@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with PICrouter. if not, see <http:/www.gnu.org/licenses/>.
  *
- * encoder.c,v.0.6.5 2013/05/25
+ * encoder.c,v.0.6.7 2013/07/10
  */
 
 #include "encoder.h"
@@ -69,6 +69,7 @@ static WORD rePosData[MAX_RE_NUM][AVG_NUM];
 static float reAbsAnglePosLast[MAX_RE_NUM];
 static float reAbsAnglePos0[MAX_RE_NUM];
 static float reAbsAnglePos[MAX_RE_NUM];
+static int reDirectionLast[MAX_RE_NUM];
 static int reDirection[MAX_RE_NUM];
 static DWORD reCounting[MAX_RE_NUM];
 static float reCounted[MAX_RE_NUM];
@@ -82,6 +83,28 @@ static void calculateEncoderPosition(BYTE index);
 static void calculateEncoderVelocity(BYTE index);
 static void smoothingEncoderVelocity(BYTE index);
 
+/*******************************************************************************
+  Function:
+    void initEncoderVariables(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void initEncoderVariables(void)
 {
     BYTE i = 0, j = 0;
@@ -110,6 +133,7 @@ void initEncoderVariables(void)
         reAbsAnglePosLast[j] = 0;
         reAbsAnglePos[j] = 0;
         reDirection[j] = 0;
+        reDirectionLast[j] = 0;
         reCounting[j] = 0;
         reCounted[j] = 0;
 
@@ -139,124 +163,714 @@ void initEncoderVariables(void)
     }
 }
 
+/*******************************************************************************
+  Function:
+    void setNumConnectedAbsEnc(BYTE num)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE num
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setNumConnectedAbsEnc(BYTE num)
 {
     numConnectedAbsEnc = num;
 }
+
+/*******************************************************************************
+  Function:
+    BYTE getNumConnectedAbsEnc(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 BYTE getNumConnectedAbsEnc(void)
 {
     return numConnectedAbsEnc;
 }
 
+/*******************************************************************************
+  Function:
+    void setInitIncEncFlag(BOOL flag)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BOOL flag
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setInitIncEncFlag(BOOL flag)
 {
     initIncEncFlag = flag;
 }
+
+/*******************************************************************************
+  Function:
+    void setInitAbsEncFlag(BOOL flag)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BOOL flag
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setInitAbsEncFlag(BOOL flag)
 {
     initAbsEncFlag = flag;
 }
+
+/*******************************************************************************
+  Function:
+    void setInitLedDrvFlag(BOOL flag)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BOOL flag
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setInitLedDrvFlag(BOOL flag)
 {
     initLedDrvFlag = flag;
 }
 
+/*******************************************************************************
+  Function:
+    void setIncEncoderPortAName(BYTE index, char* name)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+    char* name
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setIncEncoderPortAName(BYTE index, char* name)
 {
     memset(pin_a[index], 0, sizeof(pin_a[index]));
     strcpy(pin_a[index], name);
 }
+
+/*******************************************************************************
+  Function:
+    char* getIncEncoderPortAName(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 char* getIncEncoderPortAName(BYTE index)
 {
     return pin_a[index];
 }
 
+/*******************************************************************************
+  Function:
+    void setIncEncoderPortBName(BYTE index, char* name)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+    char* name
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setIncEncoderPortBName(BYTE index, char* name)
 {
     memset(pin_b[index], 0, sizeof(pin_b[index]));
     strcpy(pin_b[index], name);
 }
+
+/*******************************************************************************
+  Function:
+    char* getIncEncoderPortBName(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 char* getIncEncoderPortBName(BYTE index)
 {
     return pin_b[index];
 }
 
+/*******************************************************************************
+  Function:
+    void setIncEncoderPortSwName(BYTE index, char* name)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+    char* name
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setIncEncoderPortSwName(BYTE index, char* name)
 {
     memset(pin_sw[index], 0, sizeof(pin_sw[index]));
     strcpy(pin_sw[index], name);
 }
+
+/*******************************************************************************
+  Function:
+    char* getIncEncoderPortSwName(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 char* getIncEncoderPortSwName(BYTE index)
 {
     return pin_sw[index];
 }
 
+/*******************************************************************************
+  Function:
+    void setAbsEncoderPortCsName(char* name)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    char* name
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setAbsEncoderPortCsName(char* name)
 {
     memset(pin_cs, 0, sizeof(pin_cs));
     strcpy(pin_cs, name);
 }
+
+/*******************************************************************************
+  Function:
+    char* getAbsEncoderPortCsName(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 char* getAbsEncoderPortCsName(void)
 {
     return pin_cs;
 }
 
+/*******************************************************************************
+  Function:
+    void setAbsEncoderPortClkName(char* name)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    char* name
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setAbsEncoderPortClkName(char* name)
 {
     memset(pin_clk, 0, sizeof(pin_clk));
     strcpy(pin_clk, name);
 }
+
+/*******************************************************************************
+  Function:
+    char* getAbsEncoderPortClkName(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 char* getAbsEncoderPortClkName(void)
 {
     return pin_clk;
 }
 
+/*******************************************************************************
+  Function:
+    void setAbsEncoderPortDoName(char* name)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    char* name
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setAbsEncoderPortDoName(char* name)
 {
     memset(pin_do, 0, sizeof(pin_do));
     strcpy(pin_do, name);
 }
+
+/*******************************************************************************
+  Function:
+    char* getAbsEncoderPortDoName(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 char* getAbsEncoderPortDoName(void)
 {
     return pin_do;
 }
 
+/*******************************************************************************
+  Function:
+    void setLedDriverPortSsName(char* name)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    char* name
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setLedDriverPortSsName(char* name)
 {
     memset(pin_ss, 0, sizeof(pin_ss));
     strcpy(pin_ss, name);
 }
+
+/*******************************************************************************
+  Function:
+    char* getLedDriverPortSsName(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 char* getLedDriverPortSsName(void)
 {
     return pin_ss;
 }
 
+/*******************************************************************************
+  Function:
+    void setLedDriverSpiNumber(BYTE num)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE num
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setLedDriverSpiNumber(BYTE num)
 {
     spi_num = num;
 }
+
+/*******************************************************************************
+  Function:
+    BYTE getLedDriverSpiNumber(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 BYTE getLedDriverSpiNumber(void)
 {
     return spi_num;
 }
 
+/*******************************************************************************
+  Function:
+    BOOL getInitIncEncFlag(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 BOOL getInitIncEncFlag(void)
 {
     return initIncEncFlag;
 }
+
+/*******************************************************************************
+  Function:
+ BOOL getInitAbsEncFlag(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 BOOL getInitAbsEncFlag(void)
 {
     return initAbsEncFlag;
 }
+
+/*******************************************************************************
+  Function:
+    BOOL getInitLedDrvFlag(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 BOOL getInitLedDrvFlag(void)
 {
     return initLedDrvFlag;
 }
 
+/*******************************************************************************
+  Function:
+    void setDwLedData(BYTE index, DWORD data)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+    DWORD data
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setDwLedData(BYTE index, DWORD data)
 {
     dwLedData[index] = data;
 }
+
+/*******************************************************************************
+  Function:
+    DWORD getDwLedData(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 DWORD getDwLedData(BYTE index)
 {
     return dwLedData[index];
@@ -273,24 +887,140 @@ DWORD getDwLedSequence(BYTE index, BYTE step)
 }
 #endif
 
+/*******************************************************************************
+  Function:
+    void setLedOn(BYTE index, BOOL flag)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+    BOOL flag
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setLedOn(BYTE index, BOOL flag)
 {
     ledOn[index] = flag;
 }
+
+/*******************************************************************************
+  Function:
+    BOOL getLedOn(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
 BOOL getLedOn(BYTE index)
 {
     return ledOn[index];
 }
 
+/*******************************************************************************
+  Function:
+    void setIntensity(BYTE index0, BYTE index1, BYTE value)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index0
+    BYTE index1
+    BYTE value
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void setIntensity(BYTE index0, BYTE index1, BYTE value)
 {
     intensity[index0][index1] = value;
 }
+
+/*******************************************************************************
+  Function:
+    BYTE getIntensity(BYTE index0, BYTE index1)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index0
+    BYTE index1
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 BYTE getIntensity(BYTE index0, BYTE index1)
 {
     return intensity[index0][index1];
 }
 
+/*******************************************************************************
+  Function:
+    void encoderCheck(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void encoderCheck(BYTE index)
 {
     static BYTE cnt = 0;
@@ -346,6 +1076,28 @@ void encoderCheck(BYTE index)
     }
 }
 
+/*******************************************************************************
+  Function:
+    void incEncoderHandle(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void incEncoderHandle(BYTE index)
 {
     if(!getInitSendFlag() || !initIncEncFlag)
@@ -354,6 +1106,28 @@ void incEncoderHandle(BYTE index)
     encoderCheck(index);
 }
 
+/*******************************************************************************
+  Function:
+    void sendEncInc32(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE inde
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void sendEncInc32(BYTE index)
 {
     BYTE currentSwitch[MAX_RE_NUM];
@@ -384,6 +1158,28 @@ void sendEncInc32(BYTE index)
     }
 }
 
+/*******************************************************************************
+  Function:
+    void absEncoderHandle(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void absEncoderHandle(void)
 {
     int i = 0;
@@ -426,6 +1222,28 @@ void absEncoderHandle(void)
     }
 }
 
+/*******************************************************************************
+  Function:
+    static void receiveEncoderData(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 static void receiveEncoderData(BYTE index)
 {
     int i;
@@ -460,6 +1278,28 @@ static void receiveEncoderData(BYTE index)
     }
 }
 
+/*******************************************************************************
+  Function:
+    static void matchingEncoderData(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 static void matchingEncoderData(BYTE index)
 {
     int i;
@@ -497,6 +1337,28 @@ static void matchingEncoderData(BYTE index)
     }
 }
 
+/*******************************************************************************
+  Function:
+    static void calculateEncoderPosition(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 static void calculateEncoderPosition(BYTE index)
 {
     int i;
@@ -517,12 +1379,14 @@ static void calculateEncoderPosition(BYTE index)
 
             for(i = 0; i < reMatchCount[index]; i++)
             {
-                if(rePosData[index][i] <= 10)
+                //if(rePosData[index][i] <= 10)
+                if(rePosData[index][i] <= 200)
                 {
                     raap_min += rePosData[index][i];
                     startBoundaryCount++;
                 }
-                else if(rePosData[index][i] >= 1013)
+                //else if(rePosData[index][i] >= 1013)
+                else if(rePosData[index][i] >= 800)
                 {
                     raap_max += rePosData[index][i];
                     endBoundaryCount++;
@@ -543,6 +1407,28 @@ static void calculateEncoderPosition(BYTE index)
     }
 }
 
+/*******************************************************************************
+  Function:
+    static void calculateEncoderVelocity(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 static void calculateEncoderVelocity(BYTE index)
 {
     int i;
@@ -568,7 +1454,9 @@ static void calculateEncoderVelocity(BYTE index)
                 if(reVelAvgIndex[index] >= 8)
                     reVelAvgIndex[index] = 0;
 
-                if(fabs(reAbsAnglePos[index] - reAbsAnglePos0[index]) > 700.0)
+                //if(fabs(reAbsAnglePos[index] - reAbsAnglePos0[index]) > 700.0)
+                if((reAbsAnglePos[index] > 600 && reAbsAnglePos0[index] < 400) ||
+                   (reAbsAnglePos[index] < 400 && reAbsAnglePos0[index] > 600))
                 {
                     if(reAbsAnglePos[index] - reAbsAnglePos0[index] < 0.0)
                         diff = (reAbsAnglePos[index] + 1023.0) - reAbsAnglePos0[index];
@@ -584,6 +1472,28 @@ static void calculateEncoderVelocity(BYTE index)
     }
 }
 
+/*******************************************************************************
+  Function:
+    static void smoothingEncoderVelocity(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 static void smoothingEncoderVelocity(BYTE index)
 {
     int i;
@@ -610,10 +1520,40 @@ static void smoothingEncoderVelocity(BYTE index)
             reCounting[index] = 0;
             sendEncFlag[index] = TRUE;
         }
+        else
+        {
+            if(reDirectionLast[index] != 0)
+            {
+                reDirection[index] = 0;
+                sendEncFlag[index] = TRUE;
+            }
+        }
         reAvgIndex[index] = 0;
     }
 }
 
+/*******************************************************************************
+  Function:
+    void annularLedHandle(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void annularLedHandle(void)
 {
     int i, j;
@@ -661,6 +1601,28 @@ void annularLedHandle(void)
     outputPort(pin_ss, LOW);
 }
 
+/*******************************************************************************
+  Function:
+    void sendEncAbs32(BYTE index)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BYTE index
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void sendEncAbs32(BYTE index)
 {
     if(getInitSendFlag() && sendEncFlag[index])
@@ -668,14 +1630,16 @@ void sendEncAbs32(BYTE index)
         //debug sendOSCMessage(TxSocket, prefix, msgRotaryEnc, "fiiiiiiiii", reAbsAnglePos, reMatchCount, rePosData[0], rePosData[1], rePosData[2], rePosData[3], rePosData[4], rePosData[5], rePosData[6], rePosData[7]);
         if(reAbsAnglePos[index] > reAbsAnglePosLast[index])
         {
-            if(reAbsAnglePos[index] - reAbsAnglePosLast[index] > 1000)
+            //if(reAbsAnglePos[index] - reAbsAnglePosLast[index] > 1000)
+            if(reAbsAnglePos[index] - reAbsAnglePosLast[index] > 700)
                 reDirection[index] = -1;
             else
                 reDirection[index] = 1;
         }
         else if(reAbsAnglePos[index] < reAbsAnglePosLast[index])
         {
-            if(reAbsAnglePos[index] - reAbsAnglePosLast[index] < -1000)
+            //if(reAbsAnglePos[index] - reAbsAnglePosLast[index] < -1000)
+            if(reAbsAnglePos[index] - reAbsAnglePosLast[index] < -700)
                 reDirection[index] = 1;
             else
                 reDirection[index] = -1;
@@ -687,5 +1651,6 @@ void sendEncAbs32(BYTE index)
         sendEncFlag[index] = FALSE;
         reMatchCount[index] = 0;
         reAbsAnglePosLast[index] = reAbsAnglePos[index];
+        reDirectionLast[index] = reDirection[index];
     }
 }

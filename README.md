@@ -43,6 +43,7 @@ Demo
 * [LED Step Sequencer Test with PICrouter and LED_PAD_16][]
 * [LED Intensity Control Test with PICrouter and LED_PAD_16][]
 * [Multiple LED_ENC_ABS_32 Control Test from PICrouter][]
+* [Intensity Control Test of RGB_PAD_16 from PICrouter][]
 
 [Open Sound Control]:http://opensoundcontrol.org
 
@@ -52,6 +53,7 @@ Demo
 [LED Step Sequencer Test with PICrouter and LED_PAD_16]: http://youtu.be/5rHGf42VQA8
 [LED Intensity Control Test with PICrouter and LED_PAD_16]: http://youtu.be/yXPXuEcpFhE
 [Multiple LED_ENC_ABS_32 Control Test from PICrouter]: http://youtu.be/imvcYX0qTLs
+[Intensity Control Test of RGB_PAD_16 from PICrouter]: https://vimeo.com/70006217
 
 <div align="center">
 <a href="http://www.flickr.com/photos/yamamo2/8369607593/" title="PICrouter v1.0 TOP VIEW by tkrworks, on Flickr"><img src="http://farm9.staticflickr.com/8214/8369607593_3c1b5055e1_z.jpg" width="640" height="206" alt="PICrouter v1.0 TOP VIEW"></a>  
@@ -79,7 +81,7 @@ Specifications
 0. Supported mDNS(Bonjour on Mac OS X), DHCP(both server and client).
 1. Supported Open Sound Control.
 2. Supported the multicast address(224.0.0.1 and 224.0.0.251).
-3. Supported USB dual role function(DEVICE:MIDI & HID composite / HOST:MIDI).
+3. Supported USB dual role function(DEVICE:MIDI & HID composite / HOST:MIDI & CDC composite).
 4. Supported [USB HID bootloader][an1388] on Mac OS X and Windows.
 5. PIC32MX675F512H(Freq:80MHz / FLASH:512K / RAM:64K)
 6. A/D port x14
@@ -98,7 +100,7 @@ Pin Assign
 
 Development
 ------
-* Microchip [MPLABX] v1.80
+* Microchip [MPLABX] v1.85
 * Microchip [MPLAB XC32 Compiler] v1.21  
   *To develop application, you can use free version.*
 
@@ -131,17 +133,11 @@ Application Projects
 
 [AN1388]: http://www.microchip.com/stellent/idcplg?IdcService=SS_GET_PAGE&nodeId=1824&appnote=en554836 "AN1388"
 
-#### PICrouter (current ver. is 1.5.8) Updated 2013/05/25  
+#### PICrouter (current ver. is 1.7.0) Updated 2013/07/10  
   PICrouter is for Open Sound Control and USB Dual Role.  
   PICrouter.X is this project folder.  
   The Max6 demo patches are in Max_Demo_Patchexs folder.  
   
-#### PICrouter_OaUH (current ver. is 1.02)  
-  PICrouter_OaUH is for Open Sound Control and USB Host Function(MIDI only).  
-  PICrouter_OaUH.X is this project folder.  
-  CAUTION: This project is test version for the HID host function. In the future,
-           this will be merged into PICrouter.X.  
-
 Tutorial (JP)
 --------------------------------
 Tutorial 0 : [まずはじめに][]  

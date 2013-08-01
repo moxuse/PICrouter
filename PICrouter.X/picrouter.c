@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with PICrouter. if not, see <http:/www.gnu.org/licenses/>.
  *
- * picrouter.c,v.1.5.8 2013/05/25
+ * picrouter.c,v.1.7.1 2013/07/19
  */
 
 #include "picrouter.h"
@@ -29,39 +29,6 @@ void _general_exception_handler(unsigned cause, unsigned status)
 {
     Nop();
     Nop();
-}
-
-void initIOPorts(void)
-{
-    int i = 0;
-
-    for(i = 0; i < 14; i++)
-        setAnPortDioType(i, IO_IN);
-
-    for(i = 0; i < 4; i++)
-    {
-        setPwmPortDioType(i, IO_OUT);
-        outputPwmPort(i, LOW);
-    }
-
-    for(i = 0; i < 4; i++)
-    {
-        setDigitalPortDioType(i, IO_OUT);
-        outputDigitalPort(i, LOW);
-    }
-
-    setSpiPortDioType("sck2", IO_OUT);
-    setSpiPortDioType("sdi2", IO_OUT);
-    setSpiPortDioType("sdo2", IO_OUT);
-    setSpiPortDioType("sck4", IO_OUT);
-    setSpiPortDioType("sdi4", IO_OUT);
-    setSpiPortDioType("sdo4", IO_OUT);
-    outputSpiPort("sck2", LOW);
-    outputSpiPort("sdi2", LOW);
-    outputSpiPort("sdo2", LOW);
-    outputSpiPort("sck4", LOW);
-    outputSpiPort("sdi4", LOW);
-    outputSpiPort("sdo4", LOW);
 }
 
 int main(int argc, char** argv) {
@@ -122,6 +89,7 @@ int main(int argc, char** argv) {
     TickInit();
     InitAppConfig();
     StackInit();
+    ZeroconfLLInitialize();
     mDNSInitialize(DEFAULT_HOST_NAME);
     mDNSServiceRegister((const char *)DEFAULT_HOST_NAME, // base name of the service
                         "_oscit._udp.local",       // type of the service
@@ -170,14 +138,30 @@ int main(int argc, char** argv) {
                     switch(eth_state)
                     {
                         case 0:
-                            mDNSProcess();
+#if 0
+                            NBNSTask();
                             eth_state = 1;
                             break;
                         case 1:
+#endif
+                            ZeroconfLLProcess();
+                            eth_state = 1;// 2;
+                            break;
+                        case 1:// 2:
+                            mDNSProcess();
+                            eth_state = 2;// 3;
+                            break;
+                        case 2:// 3:
                             DHCPServerTask();
                             eth_state = 0;
                             break;
                     }
+                    if(dwLastIP != AppConfig.MyIPAddr.Val)
+                    {
+                        dwLastIP = AppConfig.MyIPAddr.Val;
+                        mDNSFillHostRecord();
+                    }
+                    
                     receiveOSCTask();
 
                     // USB Tasks
@@ -206,22 +190,51 @@ int main(int argc, char** argv) {
                     switch(eth_state)
                     {
                         case 0:
-                            mDNSProcess();
+#if 0
+                            NBNSTask();
                             eth_state = 1;
                             break;
                         case 1:
-                            DHCPServerTask();
+#endif
+                            ZeroconfLLProcess();
+                            eth_state = 1;// 2;
+                            break;
+                        case 1:// 2:
+                            mDNSProcess();
+                            eth_state = 2;// 3;
+                            break;
+                        case 2:// 3:
+                            //DHCPServerTask();
                             eth_state = 0;
                             break;
                     }
+                    if(dwLastIP != AppConfig.MyIPAddr.Val)
+                    {
+                        dwLastIP = AppConfig.MyIPAddr.Val;
+                        mDNSFillHostRecord();
+                    }
+
                     receiveOSCTask();
 
                     if(bUsbHostInitialized)
                     {
                         USBTasks();
+
                         convertMidiToOsc();
-#if 0
+
+#if defined(USB_USE_HID)
                         convertHidToOsc();
+#elif defined(USB_USE_CDC)
+                        USB_CDC_RxTxHandler();
+
+                        if(cdcReceiveInterval < 16384)
+                            cdcReceiveInterval++;
+                        else if(cdcReceiveInterval == 16384)
+                        {
+                            if(APPL_CDC_State == READY_TO_TX_RX)
+                                APPL_CDC_State = GET_IN_DATA;
+                            cdcReceiveInterval = 0;
+                        }
 #endif
                     }
                     else
@@ -240,6 +253,83 @@ int main(int argc, char** argv) {
 /**********************************************
 *  OSC Generic I/O Processing Part
 **********************************************/
+/*******************************************************************************
+  Function:
+    void initIOPorts(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
+void initIOPorts(void)
+{
+    int i = 0;
+
+    for(i = 0; i < 14; i++)
+        setAnPortDioType(i, IO_IN);
+
+    for(i = 0; i < 4; i++)
+    {
+        setPwmPortDioType(i, IO_OUT);
+        outputPwmPort(i, LOW);
+    }
+
+    for(i = 0; i < 4; i++)
+    {
+        setDigitalPortDioType(i, IO_OUT);
+        outputDigitalPort(i, LOW);
+    }
+
+    setSpiPortDioType("sck2", IO_OUT);
+    setSpiPortDioType("sdi2", IO_OUT);
+    setSpiPortDioType("sdo2", IO_OUT);
+    setSpiPortDioType("sck4", IO_OUT);
+    setSpiPortDioType("sdi4", IO_OUT);
+    setSpiPortDioType("sdo4", IO_OUT);
+    outputSpiPort("sck2", LOW);
+    outputSpiPort("sdi2", LOW);
+    outputSpiPort("sdo2", LOW);
+    outputSpiPort("sck4", LOW);
+    outputSpiPort("sdi4", LOW);
+    outputSpiPort("sdo4", LOW);
+}
+
+/*******************************************************************************
+  Function:
+    void receiveOSCTask(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void receiveOSCTask(void)
 {
     BYTE index;
@@ -403,9 +493,9 @@ void receiveOSCTask(void)
                 BYTE state = inputPort(port_name);
 
                 if(state)
-                    sendOSCMessage(getOSCPrefix(), msgAdcDi, "ss", port_name, "high");
+                    sendOSCMessage(getOSCPrefix(), msgPortIn, "ss", port_name, "high");
                 else
-                    sendOSCMessage(getOSCPrefix(), msgAdcDi, "ss", port_name, "low");
+                    sendOSCMessage(getOSCPrefix(), msgPortIn, "ss", port_name, "low");
             }
             // A/D
             else if(compareOSCAddress(msgSetAdcEnable))
@@ -433,7 +523,7 @@ void receiveOSCTask(void)
 
                 if(!strcmp(state, "on"))
                 {
-                    analogEnable[id] = TRUE;
+                    setAnalogEnable(id, TRUE);
                     setAnPortDioType(id, IO_IN);
 
                     AD1PCFG &= ~(0x0001 << id);
@@ -441,7 +531,7 @@ void receiveOSCTask(void)
                 }
                 else if(!strcmp(state, "off"))
                 {
-                    analogEnable[id] = FALSE;
+                    setAnalogEnable(id, FALSE);
                     setAnPortDioType(id, IO_IN);
 
                     AD1PCFG |= (0x0001 << id);
@@ -456,7 +546,7 @@ void receiveOSCTask(void)
                 anum = 0;
                 for(i = 0; i < AN_NUM; i++)
                 {
-                    if(analogEnable[i])
+                    if(getAnalogEnable(i))
                         anum++;
                 }
 
@@ -498,10 +588,91 @@ void receiveOSCTask(void)
                     return;
                 }
 
-                if(analogEnable[id])
+                if(getAnalogEnable(id))
                     sendOSCMessage(getOSCPrefix(), msgAdcEnable, "is", id, "on");
                 else
                     sendOSCMessage(getOSCPrefix(), msgAdcEnable, "is", id, "off");
+            }
+            else if(compareOSCAddress(msgSetAdcType))
+            {
+                BYTE id;
+                char* type = NULL;
+
+                if(getArgumentsLength() != 2)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetAdcType, ": must_be_2_arguments");
+                    return;
+                }
+
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) && compareTypeTagAtIndex(1, 's'))
+                {
+                    id = getIntArgumentAtIndex(0);
+
+                    if(id > AN_NUM - 1)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetAdcType, ": out_of_value_range");
+                        return;
+                    }
+
+                    type = getStringArgumentAtIndex(1);
+
+                    if(!strcmp(type, "8bit"))
+                    {
+                        setAnalogType(id, BYTE_ORIGINAL);
+                    }
+                    else if(!strcmp(type, "10bit"))
+                    {
+                        setAnalogType(id, WORD_ORIGINAL);
+                    }
+                    else
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetAdcType, ": must_be_8bit_or_10bit");
+                        return;
+                    }
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetAdcType, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgGetAdcType))
+            {
+                BYTE id;
+
+                if(getArgumentsLength() != 1)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgGetAdcType, ": must_be_1_argument");
+                    return;
+                }
+
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')))
+                {
+                    id = getIntArgumentAtIndex(0);
+                    if(id > AN_NUM - 1)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgGetAdcType, ": out_of_value_range");
+                        return;
+                    }
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgGetAdcType, ": wrong_argument_type");
+                    return;
+                }
+
+                switch(getAnalogType(id))
+                {
+                    case BYTE_ORIGINAL:
+                        sendOSCMessage(getOSCPrefix(), msgAdcType, "is", id, "8bit");
+                        break;
+                    case WORD_ORIGINAL:
+                        sendOSCMessage(getOSCPrefix(), msgAdcType, "is", id, "10bit");
+                        break;
+                    default:
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgGetAdcType, ": may_be_other_setting");
+                        break;
+                }
             }
             else if(compareOSCAddress(msgSetAdcDio))
             {
@@ -1346,7 +1517,7 @@ void receiveOSCTask(void)
             {
                 char* name;
 
-                if(compareTypeTagAtIndex(0, 's') && compareTypeTagAtIndex(1, 's'))
+                if(compareTypeTagAtIndex(0, 's'))
                 {
                     name = getStringArgumentAtIndex(0);
                     if(strcmp(name, "sck2") && strcmp(name, "sdi2") && strcmp(name, "sdo2") &&
@@ -1363,9 +1534,9 @@ void receiveOSCTask(void)
                 }
 
                 if(getSpiPortDioType(name))
-                    sendOSCMessage(getOSCPrefix(), msgDigitalDio, "is", name, "in");
+                    sendOSCMessage(getOSCPrefix(), msgSpiDio, "ss", name, "in");
                 else
-                    sendOSCMessage(getOSCPrefix(), msgDigitalDio, "is", name, "out");
+                    sendOSCMessage(getOSCPrefix(), msgSpiDio, "ss", name, "out");
             }
             else if(compareOSCAddress(msgSetSpiDo))
             {
@@ -1424,6 +1595,494 @@ void receiveOSCTask(void)
                     sendOSCMessage(getOSCPrefix(), msgSpiDi, "ss", name, "high");
                 else
                     sendOSCMessage(getOSCPrefix(), msgSpiDi, "ss", name, "low");
+            }
+            // I2C
+            else if(compareOSCAddress(msgEnableI2c))
+            {
+                BYTE id;
+                char* cFlag = NULL;
+                BOOL flag = FALSE;
+
+                if(compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f') && compareTypeTagAtIndex(1, 's'))
+                {
+                    id = getIntArgumentAtIndex(0);
+                    cFlag = getStringArgumentAtIndex(1);
+                    if(!strcmp(cFlag, "true"))
+                        flag = TRUE;
+                    else if(!strcmp(cFlag, "false"))
+                        flag = FALSE;
+                    else
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgEnableI2c, ": wrong_argument_string");
+                        return;
+                    }
+
+                    switch(id)
+                    {
+                        case 3:
+                            setPortIOType("b2", IO_IN);
+                            setPortIOType("b3", IO_IN);
+                            I2CEnable(I2C3, flag);
+                            break;
+                        case 4:
+                            setPortIOType("g7", IO_IN);
+                            setPortIOType("g8", IO_IN);
+                            I2CEnable(I2C4, flag);
+                            break;
+                        case 5:
+                            setPortIOType("f4", IO_IN);
+                            setPortIOType("f5", IO_IN);
+                            I2CEnable(I2C5, flag);
+                            break;
+                        default:
+                            sendOSCMessage(sysPrefix, msgError, "ss", msgEnableI2c, ": out_of_range_value");
+                            break;
+                    }
+                }
+                else
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgEnableI2c, ": wrong_argument_type");
+            }
+            else if(compareOSCAddress(msgSetI2cConfig))
+            {
+                BYTE id;
+                DWORD i2cFlags = 0;
+
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')))
+                {
+                    id = getIntArgumentAtIndex(0);
+
+                    if(getArgumentsLength() < 1)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cConfig, ": need_1_arguments_at_leaset");
+                        return;
+                    }
+
+                    for(i = 1; i < getArgumentsLength(); i++)
+                    {
+                        char* flag;
+                        if(compareTypeTagAtIndex(i, 's'))
+                            flag = getStringArgumentAtIndex(i);
+                        else
+                        {
+                            sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cConfig, ": wrong_argument_type");
+                            return;
+                        }
+
+                        if(!strcmp(flag, "enable_slave_clock_stretching"))
+                            i2cFlags |= I2C_ENABLE_SLAVE_CLOCK_STRETCHING;
+                        else if(!strcmp(flag, "enable_smb_support"))
+                            i2cFlags |= I2C_ENABLE_SMB_SUPPORT;
+                        else if(!strcmp(flag, "enable_high_speed"))
+                            i2cFlags |= I2C_ENABLE_HIGH_SPEED;
+                        else if(!strcmp(flag, "stop_in_idle"))
+                            i2cFlags |= I2C_STOP_IN_IDLE;
+                    }
+
+                    switch(id)
+                    {
+                        case 3:
+                            I2CConfigure(I2C3, i2cFlags);
+                            break;
+                        case 4:
+                            I2CConfigure(I2C4, i2cFlags);
+                            break;
+                        case 5:
+                            I2CConfigure(I2C5, i2cFlags);
+                            break;
+                        default:
+                            sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cConfig, ": 0:out_of_value_range");
+                            return;
+                    }
+                }
+                else
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cConfig, ": wrong_argument_type");
+            }
+            else if(compareOSCAddress(msgSetI2cFreq))
+            {
+                BYTE id;
+                DWORD i2cFreq = 0;
+                DWORD actualFreq = 0;
+
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) && (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')))
+                {
+                    id = getIntArgumentAtIndex(0);
+                    i2cFreq = getIntArgumentAtIndex(1);
+
+                    if(getArgumentsLength() < 2)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cConfig, ": need_2_arguments_at_leaset");
+                        return;
+                    }
+
+                    switch(id)
+                    {
+                        case 3:
+                            actualFreq = I2CSetFrequency(I2C3, GetPeripheralClock(), i2cFreq);
+                            break;
+                        case 4:
+                            actualFreq = I2CSetFrequency(I2C4, GetPeripheralClock(), i2cFreq);
+                            break;
+                        case 5:
+                            actualFreq = I2CSetFrequency(I2C5, GetPeripheralClock(), i2cFreq);
+                            break;
+                        default:
+                            sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cConfig, ": 0:out_of_value_range");
+                            return;
+                    }
+                    if((actualFreq - i2cFreq) > i2cFreq / 10)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cConfig, ": bad_frequency");
+                        return;
+                    }
+                }
+                else
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cConfig, ": wrong_argument_type");
+            }
+            else if(compareOSCAddress(msgSetI2cSlaveAddress))
+            {
+                BYTE id;
+                WORD address;
+                WORD mask;
+                DWORD slvAdrsFlags = 0;
+
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) && (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')) && (compareTypeTagAtIndex(2, 'i') || compareTypeTagAtIndex(2, 'f')))
+                {
+                    id = getIntArgumentAtIndex(0);
+                    address = getIntArgumentAtIndex(1);
+                    mask = getIntArgumentAtIndex(2);
+
+                    if(getArgumentsLength() < 4)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cSlaveAddress, ": need_4_arguments_at_leaset");
+                        return;
+                    }
+
+                    for(i = 3; i < getArgumentsLength(); i++)
+                    {
+                        char* flag;
+                        if(compareTypeTagAtIndex(i, 's'))
+                            flag = getStringArgumentAtIndex(i);
+                        else
+                        {
+                            sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cSlaveAddress, ": wrong_argument_type");
+                            return;
+                        }
+
+                        if(!strcmp(flag, "use_7bit_address"))
+                            slvAdrsFlags |= I2C_USE_7BIT_ADDRESS;
+                        else if(!strcmp(flag, "use_10bit_address"))
+                            slvAdrsFlags |= I2C_USE_10BIT_ADDRESS;
+                        else if(!strcmp(flag, "enable_general_call_address"))
+                            slvAdrsFlags |= I2C_ENABLE_GENERAL_CALL_ADDRESS;
+                        else if(!strcmp(flag, "use_reserved_addresses"))
+                            slvAdrsFlags |= I2C_USE_RESERVED_ADDRESSES;
+                    }
+
+                    switch(id)
+                    {
+                        case 3:
+                            I2CSetSlaveAddress(I2C3, address, mask, slvAdrsFlags);
+                            break;
+                        case 4:
+                            I2CSetSlaveAddress(I2C4, address, mask, slvAdrsFlags);
+                            break;
+                        case 5:
+                            I2CSetSlaveAddress(I2C5, address, mask, slvAdrsFlags);
+                            break;
+                        default:
+                            sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cSlaveAddress, ": 0:out_of_value_range");
+                            return;
+                    }
+                }
+                else
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cSlaveAddress, ": wrong_argument_type");
+            }
+            else if(compareOSCAddress(msgSetI2cData))
+            {
+                BYTE id;
+                BYTE slave_address;
+                BYTE chip_address;
+                WORD address = 0;
+                DWORD data = 0;
+
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) && (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')) &&
+                   (compareTypeTagAtIndex(2, 'i') || compareTypeTagAtIndex(2, 'f')) && (compareTypeTagAtIndex(3, 'i') || compareTypeTagAtIndex(3, 'f')) &&
+                   (compareTypeTagAtIndex(4, 'i') || compareTypeTagAtIndex(4, 'f')))
+                {
+                    id = getIntArgumentAtIndex(0);
+                    slave_address = getIntArgumentAtIndex(1);
+                    chip_address = getIntArgumentAtIndex(2);
+                    address = getIntArgumentAtIndex(3);
+                    data = getIntArgumentAtIndex(4);
+
+                    switch(id)
+                    {
+                        case 3:
+                            if(!startI2C(I2C_3))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 0:");
+                            idleI2C(I2C_3);
+
+                            setAddressToI2C(I2C_3, slave_address | (chip_address << 1), 'w');
+                            idleI2C(I2C_3);
+
+                            if(!checkAckI2C(I2C_3))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 1:");
+
+                            idleI2C(I2C_3);
+                            setDataToI2C(I2C_3, address >> 8);
+                            idleI2C(I2C_3);
+
+                            if(!checkAckI2C(I2C_3))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 2:");
+
+                            idleI2C(I2C_3);
+                            setDataToI2C(I2C_3, address & 0x00FF);
+                            idleI2C(I2C_3);
+
+                            if(!checkAckI2C(I2C_3))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 3:");
+
+                            idleI2C(I2C_3);
+                            setDataToI2C(I2C_3, data);
+                            idleI2C(I2C_3);
+
+                            if(!checkAckI2C(I2C_3))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 4:");
+
+                            stopI2C(I2C_3);
+                            idleI2C(I2C_3);
+                            DelayMs(5);
+                            break;
+                        case 4:
+                            if(!startI2C(I2C_4))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 0:");
+                            idleI2C(I2C_4);
+
+                            setAddressToI2C(I2C_4, slave_address | (chip_address << 1), 'w');
+                            idleI2C(I2C_4);
+
+                            if(!checkAckI2C(I2C_4))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 1:");
+
+                            idleI2C(I2C_4);
+                            setDataToI2C(I2C_4, address >> 8);
+                            idleI2C(I2C_4);
+
+                            if(!checkAckI2C(I2C_4))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 2:");
+
+                            idleI2C(I2C_4);
+                            setDataToI2C(I2C_4, address & 0x00FF);
+                            idleI2C(I2C_4);
+
+                            if(!checkAckI2C(I2C_4))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 3:");
+
+                            idleI2C(I2C_4);
+                            setDataToI2C(I2C_4, data);
+                            idleI2C(I2C_4);
+
+                            if(!checkAckI2C(I2C_4))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 4:");
+
+                            stopI2C(I2C_4);
+                            idleI2C(I2C_4);
+                            DelayMs(5);
+                            break;
+                        case 5:
+                            if(!startI2C(I2C_5))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 0:");
+                            idleI2C(I2C_5);
+
+                            setAddressToI2C(I2C_5, slave_address | (chip_address << 1), 'w');
+                            idleI2C(I2C_5);
+
+                            if(!checkAckI2C(I2C_5))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 1:");
+
+                            idleI2C(I2C_5);
+                            setDataToI2C(I2C_5, address >> 8);
+                            idleI2C(I2C_5);
+
+                            if(!checkAckI2C(I2C_5))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 2:");
+
+                            idleI2C(I2C_5);
+                            setDataToI2C(I2C_5, address & 0x00FF);
+                            idleI2C(I2C_5);
+
+                            if(!checkAckI2C(I2C_5))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 3:");
+
+                            idleI2C(I2C_5);
+                            setDataToI2C(I2C_5, data);
+                            idleI2C(I2C_5);
+
+                            if(!checkAckI2C(I2C_5))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 4:");
+
+                            stopI2C(I2C_5);
+                            idleI2C(I2C_5);
+                            DelayMs(5);
+                            break;
+                    }
+                }
+                else
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetI2cData, ": wrong_argument_type");
+            }
+            else if(compareOSCAddress(msgGetI2cData))
+            {
+                BYTE id;
+                BYTE slave_address = 0;
+                BYTE chip_address = 0;
+                WORD address = 0;
+                BYTE data;
+
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) && (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')) && (compareTypeTagAtIndex(2, 'i') || compareTypeTagAtIndex(2, 'f')) && (compareTypeTagAtIndex(3, 'i') || compareTypeTagAtIndex(3, 'f')))
+                {
+                    id = getIntArgumentAtIndex(0);
+                    slave_address = getIntArgumentAtIndex(1);
+                    chip_address = getIntArgumentAtIndex(2);
+                    address = getIntArgumentAtIndex(3);
+
+                    switch(id)
+                    {
+                        case 3:
+                            if(!startI2C(I2C_3))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 0:");
+                            idleI2C(I2C_3);
+
+                            setAddressToI2C(I2C_3, slave_address | (chip_address << 1), 'w');
+                            idleI2C(I2C_3);
+
+                            if(!checkAckI2C(I2C_3))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 1:");
+
+                            idleI2C(I2C_3);
+                            setDataToI2C(I2C_3, address >> 8);
+                            idleI2C(I2C_3);
+
+                            if(!checkAckI2C(I2C_3))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 2:");
+
+                            idleI2C(I2C_3);
+                            setDataToI2C(I2C_3, address & 0x00FF);
+                            idleI2C(I2C_3);
+
+                            if(!checkAckI2C(I2C_3))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 3:");
+
+                            restartI2C(I2C_3);
+
+                            setAddressToI2C(I2C_3, slave_address | (chip_address << 1), 'r');
+                            idleI2C(I2C_3);
+
+                            if(!checkAckI2C(I2C_3))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 4:");
+
+                            data = getDataFromI2C(I2C_3);
+
+                            //I2C3CONbits.ACKDT = 1;
+                            //I2C3CONbits.ACKEN = 1;
+                            //while(I2C3CONbits.ACKEN == 1);
+
+                            stopI2C(I2C_3);
+                            idleI2C(I2C_3);
+
+                            sendOSCMessage(getOSCPrefix(), msgI2cData, "iii", id, address, data);
+                            break;
+                        case 4:
+                            if(!startI2C(I2C_4))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 0:");
+                            idleI2C(I2C_4);
+
+                            setAddressToI2C(I2C_4, slave_address | (chip_address << 1), 'w');
+                            idleI2C(I2C_4);
+
+                            if(!checkAckI2C(I2C_4))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 1:");
+
+                            idleI2C(I2C_4);
+                            setDataToI2C(I2C_4, address >> 8);
+                            idleI2C(I2C_4);
+
+                            if(!checkAckI2C(I2C_4))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 2:");
+
+                            idleI2C(I2C_4);
+                            setDataToI2C(I2C_4, address & 0x00FF);
+                            idleI2C(I2C_4);
+
+                            if(!checkAckI2C(I2C_4))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 3:");
+
+                            restartI2C(I2C_4);
+
+                            setAddressToI2C(I2C_4, slave_address | (chip_address << 1), 'r');
+                            idleI2C(I2C_4);
+
+                            if(!checkAckI2C(I2C_4))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 4:");
+
+                            data = getDataFromI2C(I2C_4);
+
+                            //I2C4CONbits.ACKDT = 1;
+                            //I2C4CONbits.ACKEN = 1;
+                            //while(I2C4CONbits.ACKEN == 1);
+                            
+                            stopI2C(I2C_4);
+                            idleI2C(I2C_4);
+
+                            sendOSCMessage(getOSCPrefix(), msgI2cData, "iii", id, address, data);
+                            break;
+                        case 5:
+                            if(!startI2C(I2C_5))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 0:");
+                            idleI2C(I2C_5);
+
+                            setAddressToI2C(I2C_5, slave_address | (chip_address << 1), 'w');
+                            idleI2C(I2C_5);
+
+                            if(!checkAckI2C(I2C_5))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 1:");
+
+                            idleI2C(I2C_5);
+                            setDataToI2C(I2C_5, address >> 8);
+                            idleI2C(I2C_5);
+
+                            if(!checkAckI2C(I2C_5))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 2:");
+
+                            idleI2C(I2C_5);
+                            setDataToI2C(I2C_5, address & 0x00FF);
+                            idleI2C(I2C_5);
+
+                            if(!checkAckI2C(I2C_5))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 3:");
+
+                            restartI2C(I2C_5);
+
+                            setAddressToI2C(I2C_5, slave_address | (chip_address << 1), 'r');
+                            idleI2C(I2C_5);
+
+                            if(!checkAckI2C(I2C_5))
+                                sendOSCMessage(sysPrefix, msgError, "s", "I2C Error 4:");
+
+                            data = getDataFromI2C(I2C_5);
+
+                            //I2C5CONbits.ACKDT = 1;
+                            //I2C5CONbits.ACKEN = 1;
+                            //while(I2C5CONbits.ACKEN == 1);
+
+                            stopI2C(I2C_5);
+                            idleI2C(I2C_5);
+
+                            sendOSCMessage(getOSCPrefix(), msgI2cData, "iii", id, address, data);
+                            break;
+                    }
+                }
+                else
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgGetI2cData, ": wrong_argument_type");
             }
             else if(compareOSCAddress(msgSetLcdConfig))
             {
@@ -2007,6 +2666,413 @@ void receiveOSCTask(void)
                 else
                 {
                     sendOSCMessage(sysPrefix, msgError, "ss", msgGetLatticeLedIntensity, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgLatticePadPinSelect))
+            {
+                if(getArgumentsLength() < 4)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgLatticePadPinSelect, ": too_few_arguments");
+                    return;
+                }
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) && compareTypeTagAtIndex(1, 's') && compareTypeTagAtIndex(2, 's') && compareTypeTagAtIndex(3, 's'))
+                {
+                    BYTE index = getIntArgumentAtIndex(0);
+                    char* name_clk = getStringArgumentAtIndex(1);
+                    char* name_shld = getStringArgumentAtIndex(2);
+                    char* name_qh = getStringArgumentAtIndex(3);
+
+                    if(strlen(name_clk) > 3 || strlen(name_shld) > 3 || strlen(name_qh) > 3)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgLatticePadPinSelect, ": too_long_string_length");
+                        return;
+                    }
+
+                    setLatticePadPortClkName(index, name_clk);
+                    setPortIOType(getLatticePadPortClkName(index), IO_OUT);
+                    setLatticePadPortShLdName(index, name_shld);
+                    setPortIOType(getLatticePadPortShLdName(index), IO_OUT);
+                    setLatticePadPortQhName(index, name_qh);
+                    setPortIOType(getLatticePadPortQhName(index), IO_IN);
+
+                    setInitPadFlag(TRUE);
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgLatticePadPinSelect, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgLatticeRgbDrvPinSelect))
+            {
+                if(getArgumentsLength() < 2)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgLatticeRgbDrvPinSelect, ": too_few_arguments");
+                    return;
+                }
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) && compareTypeTagAtIndex(1, 's'))
+                {
+                    BYTE num = getIntArgumentAtIndex(0);
+                    char* name_load = getStringArgumentAtIndex(1);
+
+                    if(strlen(name_load) > 3)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgLatticeRgbDrvPinSelect, ": too_long_string_length");
+                        return;
+                    }
+
+                    setLatticePadPortLoadName(name_load);
+                    setPortIOType(name_load, IO_OUT);
+                    outputPort(name_load, LOW);
+
+                    switch(num)
+                    {
+                        case 2:
+                            setLatticeRgbDriverSpiNumber(2);
+                            SpiChnClose(2);
+                            SpiChnOpen(SPI_CHANNEL2, SPICON_MSTEN | SPICON_SMP | SPICON_MODE16 | SPICON_CKE | SPICON_ON, 4);
+                            setInitLatticeRgbDrvFlag(TRUE);
+                            break;
+                        case 4:
+                            setLatticeRgbDriverSpiNumber(4);
+                            SpiChnClose(4);
+                            SpiChnOpen(SPI_CHANNEL4, SPICON_MSTEN | SPICON_SMP | SPICON_MODE16 | SPICON_CKE | SPICON_ON, 4);
+                            setInitLatticeRgbDrvFlag(TRUE);
+                            break;
+                        default:
+                            sendOSCMessage(sysPrefix, msgError, "ss", msgLatticeRgbDrvPinSelect, ": out_of_range_value");
+                            return;
+                            break;
+                    }
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgLatticeRgbDrvPinSelect, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgSetLatticeRgb))
+            {
+                if(getArgumentsLength() < 5)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgb, ": too_few_arguments");
+                    return;
+                }
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) &&
+                   (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')) &&
+                   (compareTypeTagAtIndex(2, 'i') || compareTypeTagAtIndex(2, 'f')) &&
+                   (compareTypeTagAtIndex(3, 'i') || compareTypeTagAtIndex(3, 'f')) &&
+                   (compareTypeTagAtIndex(4, 'i') || compareTypeTagAtIndex(4, 'f')))
+                {
+                    BYTE index = getIntArgumentAtIndex(0);
+                    BYTE layer = getIntArgumentAtIndex(1);
+                    BYTE x = getIntArgumentAtIndex(2);
+                    BYTE y = getIntArgumentAtIndex(3);
+                    BYTE state = getIntArgumentAtIndex(4);
+                    BYTE intensity;
+                    WORD pos = (1 << y) << (x * 4);
+
+                    if(x > 3 || y > 3 || state > 1)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgb, ": out_of_range_value");
+                        return;
+                    }
+
+                    if(getArgumentsLength() == 5)
+                        setLatticeRgbIntensity(index, layer, y + (x * 4), 100);
+                    else if(getArgumentsLength() == 6)
+                    {
+                        if(compareTypeTagAtIndex(5, 'i') || compareTypeTagAtIndex(5, 'f'))
+                        {
+                            intensity = getIntArgumentAtIndex(5);
+                            if(intensity > 100)
+                                intensity = 100;
+                            setLatticeRgbIntensity(index, layer, y + (x * 4), intensity);
+                        }
+                        else
+                        {
+                            sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgb, ": wrong_argument_type");
+                            return;
+                        }
+                    }
+
+                    if(state)
+                        setLatticeRgb(index, layer, getLatticeRgb(index, layer) | pos);
+                    else
+                        setLatticeRgb(index, layer, getLatticeRgb(index, layer) & ~pos);
+
+                    if(getLatticeRgb(index, layer) != 0)
+                        setLatticeRgbOn(index, layer, TRUE);
+                    else
+                        setLatticeRgbOn(index, layer, FALSE);
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgb, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgSetLatticeRgbColumn))
+            {
+                if(getArgumentsLength() < 4)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbColumn, ": too_few_arguments");
+                    return;
+                }
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) &&
+                   (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')) &&
+                   (compareTypeTagAtIndex(2, 'i') || compareTypeTagAtIndex(2, 'f')) &&
+                   (compareTypeTagAtIndex(3, 'i') || compareTypeTagAtIndex(3, 'f')))
+                {
+                    BYTE index = getIntArgumentAtIndex(0);
+                    BYTE layer = getIntArgumentAtIndex(1);
+                    BYTE column = getIntArgumentAtIndex(2);
+                    BYTE data = getIntArgumentAtIndex(3);
+
+                    if(column > 3 || data > 15)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbColumn, ": out_of_range_value");
+                        return;
+                    }
+
+                    setLatticeRgb(index, layer, getLatticeRgb(index, layer) & ~(0x000F << (column * 4)));
+                    setLatticeRgb(index, layer, getLatticeRgb(index, layer) | (data << (column * 4)));
+
+                    if(getArgumentsLength() == 4)
+                    {
+                        for(i = 0; i < 4; i++)
+                            setLatticeRgbIntensity(index, layer, i + (column * 4), 100);
+                    }
+                    else if(getArgumentsLength() == 8)
+                    {
+                        for(i = 0; i < 4; i++)
+                            setLatticeRgbIntensity(index, layer, i + (column * 4), getIntArgumentAtIndex(4 + i));
+                    }
+                    else
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbColumn, ": too_few_intensity_value");
+                        return;
+                    }
+
+                    if(getLatticeRgb(index, layer) != 0)
+                        setLatticeRgbOn(index, layer, TRUE);
+                    else
+                        setLatticeRgbOn(index, layer, FALSE);
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbColumn, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgSetLatticeRgbRow))
+            {
+                if(getArgumentsLength() < 4)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbRow, ": too_few_arguments");
+                    return;
+                }
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) &&
+                   (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')) &&
+                   (compareTypeTagAtIndex(2, 'i') || compareTypeTagAtIndex(2, 'f')) &&
+                   (compareTypeTagAtIndex(3, 'i') || compareTypeTagAtIndex(3, 'f')))
+                {
+                    BYTE index = getIntArgumentAtIndex(0);
+                    BYTE layer = getIntArgumentAtIndex(1);
+                    BYTE row = getIntArgumentAtIndex(2);
+                    BYTE data = getIntArgumentAtIndex(3);
+                    WORD data1 = 0;
+
+                    if(row > 3 || data > 15)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbRow, ": out_of_range_value");
+                        return;
+                    }
+
+                    for(i = 0; i < 4; i++)
+                    {
+                        if((data >> i) & 0x01)
+                            data1 |= (1 << (i * 4));
+                    }
+                    setLatticeRgb(index, layer, getLatticeRgb(index, layer) & ~(0x1111 << row));
+                    setLatticeRgb(index, layer, getLatticeRgb(index, layer) | (data1 << row));
+
+                    if(getArgumentsLength() == 4)
+                    {
+                        for(i = 0; i < 4; i++)
+                            setLatticeRgbIntensity(index, layer, row + (i * 4), 100);
+                    }
+                    else if(getArgumentsLength() == 8)
+                    {
+                        for(i = 0; i < 4; i++)
+                            setLatticeRgbIntensity(index, layer, row + (i * 4), getIntArgumentAtIndex(4 + i));
+                    }
+                    else
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbRow, ": too_few_intensity_value");
+                        return;
+                    }
+
+                    if(getLatticeRgb(index, layer) != 0)
+                        setLatticeRgbOn(index, layer, TRUE);
+                    else
+                        setLatticeRgbOn(index, layer, FALSE);
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbRow, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgSetLatticeRgbAll))
+            {
+                if(getArgumentsLength() < 6)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbAll, ": too_few_arguments");
+                    return;
+                }
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) &&
+                   (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')) &&
+                   (compareTypeTagAtIndex(2, 'i') || compareTypeTagAtIndex(2, 'f')) &&
+                   (compareTypeTagAtIndex(3, 'i') || compareTypeTagAtIndex(3, 'f')))
+                {
+                    BYTE index = getIntArgumentAtIndex(0);
+                    BYTE layer = getIntArgumentAtIndex(1);
+                    BYTE data = 0;
+                    WORD data1;
+
+                    for(i = 0; i < 4; i++)
+                    {
+                        data = getIntArgumentAtIndex(i + 2);
+                        if(data > 15)
+                        {
+                            sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbAll, ": out_of_range_value");
+                            return;
+                        }
+
+                        data1 = 0;
+                        for(j = 0; j < 4; j++)
+                        {
+                            if((data >> j) & 0x01)
+                                data1 |= (1 << (j * 4));
+                        }
+                        setLatticeRgb(index, layer, getLatticeRgb(index, layer) & ~(0x1111 << i));
+                        setLatticeRgb(index, layer, getLatticeRgb(index, layer) | (data1 << i));
+                    }
+
+                    if(getArgumentsLength() == 6)
+                    {
+                        for(i = 0; i < 16; i++)
+                            setLatticeRgbIntensity(index, layer, i, 100);
+                    }
+                    else if(getArgumentsLength() == 22)
+                    {
+                        for(i = 0; i < 16; i++)
+                        {
+                            //setLatticeIntensity(index, i, getIntArgumentAtIndex(5 + i));
+                            BYTE ii = (i - (i / 4) * 4) * 4 + (i / 4);
+                            setLatticeRgbIntensity(index, layer, ii, getIntArgumentAtIndex(6 + i));
+                        }
+                    }
+                    else
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbAll, ": too_few_intensity_value");
+                        return;
+                    }
+
+                    if(getLatticeRgb(index, layer) != 0)
+                        setLatticeRgbOn(index, layer, TRUE);
+                    else
+                        setLatticeRgbOn(index, layer, FALSE);
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbAll, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgLatticeRgbClear))
+            {
+                if(getArgumentsLength() < 2)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgLatticeRgbClear, ": too_few_arguments");
+                    return;
+                }
+
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) &&
+                   (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')))
+                {
+                    BYTE index = getIntArgumentAtIndex(0);
+                    BYTE layer = getIntArgumentAtIndex(1);
+                    setLatticeRgb(index, layer, 0);
+                    setLatticeRgbOn(index, layer, FALSE);
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgLatticeRgbClear, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgGetLatticeRgbIntensity))
+            {
+                if(getArgumentsLength() < 4)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgGetLatticeRgbIntensity, ": too_few_arguments");
+                    return;
+                }
+
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) &&
+                   (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')) &&
+                   (compareTypeTagAtIndex(2, 'i') || compareTypeTagAtIndex(2, 'f')) &&
+                   (compareTypeTagAtIndex(3, 'i') || compareTypeTagAtIndex(3, 'f')))
+                {
+                    BYTE index = getIntArgumentAtIndex(0);
+                    BYTE layer = getIntArgumentAtIndex(1);
+                    BYTE x = getIntArgumentAtIndex(2);
+                    BYTE y = getIntArgumentAtIndex(3);
+
+                    if(x > 3 || y > 3)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgGetLatticeRgbIntensity, ": out_of_range_value");
+                        return;
+                    }
+
+                    sendOSCMessage(getOSCPrefix(), msgLatticeRgbIntensity, "iiii", index, x, y, getLatticeRgbIntensity(index, layer, y + (x * 4)));
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgGetLatticeRgbIntensity, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgGetLatticeRgbIntensityAll))
+            {
+                if(getArgumentsLength() < 2)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgGetLatticeRgbIntensity, ": too_few_arguments");
+                    return;
+                }
+
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) &&
+                   (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')))
+                {
+                    BYTE index = getIntArgumentAtIndex(0);
+                    BYTE layer = getIntArgumentAtIndex(1);
+
+                    sendOSCMessage(getOSCPrefix(), msgLatticeRgbIntensity, "iiiiiiiiiiiiiiiii", index,
+                                   getLatticeRgbIntensity(index, layer, 0), getLatticeRgbIntensity(index, layer, 1),
+                                   getLatticeRgbIntensity(index, layer, 2), getLatticeRgbIntensity(index, layer, 3),
+                                   getLatticeRgbIntensity(index, layer, 4), getLatticeRgbIntensity(index, layer, 5),
+                                   getLatticeRgbIntensity(index, layer, 6), getLatticeRgbIntensity(index, layer, 7),
+                                   getLatticeRgbIntensity(index, layer, 8), getLatticeRgbIntensity(index, layer, 9),
+                                   getLatticeRgbIntensity(index, layer, 10), getLatticeRgbIntensity(index, layer, 11),
+                                   getLatticeRgbIntensity(index, layer, 12), getLatticeRgbIntensity(index, layer, 13),
+                                   getLatticeRgbIntensity(index, layer, 14), getLatticeRgbIntensity(index, layer, 15));
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgGetLatticeRgbIntensity, ": wrong_argument_type");
                     return;
                 }
             }
@@ -2818,6 +3884,200 @@ void receiveOSCTask(void)
                 T2CONbits.TON = 1;
             }
         }
+        // MIDI
+        else if(compareOSCPrefix(midiPrefix))
+        {
+            if(compareOSCAddress(msgSetNote)) // Note On/Off
+            {
+                BYTE currentEndpoint;
+
+                BYTE ch = getIntArgumentAtIndex(0);
+                BYTE num = getIntArgumentAtIndex(1);
+                BYTE vel = getIntArgumentAtIndex(2);
+
+                OSCTranslatedToUSB.Val = 0;
+                OSCTranslatedToUSB.CableNumber = 0;
+                OSCTranslatedToUSB.CodeIndexNumber = MIDI_CIN_NOTE_ON;
+                OSCTranslatedToUSB.DATA_0 = 0x90 + ch;
+                OSCTranslatedToUSB.DATA_1 = num;
+                OSCTranslatedToUSB.DATA_2 = vel;
+
+                for(currentEndpoint = 0; currentEndpoint < USBHostMIDINumberOfEndpoints(deviceHandle); currentEndpoint++)
+                {
+                    endpointBuffers[currentEndpoint].pBufWriteLocation->Val = OSCTranslatedToUSB.Val;
+                    endpointBuffers[currentEndpoint].pBufWriteLocation += endpointBuffers[currentEndpoint].numOfMIDIPackets;
+
+                    if(endpointBuffers[currentEndpoint].pBufWriteLocation - endpointBuffers[currentEndpoint].bufferStart >= endpointBuffers[currentEndpoint].numOfMIDIPackets * MIDI_USB_BUFFER_SIZE)
+                    {
+                        endpointBuffers[currentEndpoint].pBufWriteLocation = endpointBuffers[currentEndpoint].bufferStart;
+                    }
+                    break;
+                }
+            }
+            else if(compareOSCAddress(msgSetCc)) // Control Change
+            {
+                BYTE currentEndpoint;
+
+                BYTE ch = getIntArgumentAtIndex(0);
+                BYTE num = getIntArgumentAtIndex(1);
+                BYTE val = getIntArgumentAtIndex(2);
+
+                OSCTranslatedToUSB.Val = 0;
+                OSCTranslatedToUSB.CableNumber = 0;
+                OSCTranslatedToUSB.CodeIndexNumber = MIDI_CIN_CONTROL_CHANGE;
+                OSCTranslatedToUSB.DATA_0 = 0xB0 + ch;
+                OSCTranslatedToUSB.DATA_1 = num;
+                OSCTranslatedToUSB.DATA_2 = val;
+
+                for(currentEndpoint = 0; currentEndpoint < USBHostMIDINumberOfEndpoints(deviceHandle); currentEndpoint++)
+                {
+                    endpointBuffers[currentEndpoint].pBufWriteLocation->Val = OSCTranslatedToUSB.Val;
+                    endpointBuffers[currentEndpoint].pBufWriteLocation += endpointBuffers[currentEndpoint].numOfMIDIPackets;
+
+                    if(endpointBuffers[currentEndpoint].pBufWriteLocation - endpointBuffers[currentEndpoint].bufferStart >= endpointBuffers[currentEndpoint].numOfMIDIPackets * MIDI_USB_BUFFER_SIZE)
+                    {
+                        endpointBuffers[currentEndpoint].pBufWriteLocation = endpointBuffers[currentEndpoint].bufferStart;
+                    }
+                    break;
+                }
+            }
+            else if(compareOSCAddress(msgSetKp)) // Polyphonic Key Pressure
+            {
+                BYTE currentEndpoint;
+
+                BYTE ch = getIntArgumentAtIndex(0);
+                BYTE num = getIntArgumentAtIndex(1);
+                BYTE prs = getIntArgumentAtIndex(2);
+
+                OSCTranslatedToUSB.Val = 0;
+                OSCTranslatedToUSB.CableNumber = 0;
+                OSCTranslatedToUSB.CodeIndexNumber = MIDI_CIN_POLY_KEY_PRESS;
+                OSCTranslatedToUSB.DATA_0 = 0xA0 + ch;
+                OSCTranslatedToUSB.DATA_1 = num;
+                OSCTranslatedToUSB.DATA_2 = prs;
+
+                for(currentEndpoint = 0; currentEndpoint < USBHostMIDINumberOfEndpoints(deviceHandle); currentEndpoint++)
+                {
+                    endpointBuffers[currentEndpoint].pBufWriteLocation->Val = OSCTranslatedToUSB.Val;
+                    endpointBuffers[currentEndpoint].pBufWriteLocation += endpointBuffers[currentEndpoint].numOfMIDIPackets;
+
+                    if(endpointBuffers[currentEndpoint].pBufWriteLocation - endpointBuffers[currentEndpoint].bufferStart >= endpointBuffers[currentEndpoint].numOfMIDIPackets * MIDI_USB_BUFFER_SIZE)
+                    {
+                        endpointBuffers[currentEndpoint].pBufWriteLocation = endpointBuffers[currentEndpoint].bufferStart;
+                    }
+                    break;
+                }
+            }
+            else if(compareOSCAddress(msgSetPc)) // Program Change
+            {
+                BYTE currentEndpoint;
+
+                BYTE ch = getIntArgumentAtIndex(0);
+                BYTE pnum = getIntArgumentAtIndex(1);
+
+                OSCTranslatedToUSB.Val = 0;
+                OSCTranslatedToUSB.CableNumber = 0;
+                OSCTranslatedToUSB.CodeIndexNumber = MIDI_CIN_PROGRAM_CHANGE;
+                OSCTranslatedToUSB.DATA_0 = 0xC0 + ch;
+                OSCTranslatedToUSB.DATA_1 = pnum;
+
+                for(currentEndpoint = 0; currentEndpoint < USBHostMIDINumberOfEndpoints(deviceHandle); currentEndpoint++)
+                {
+                    endpointBuffers[currentEndpoint].pBufWriteLocation->Val = OSCTranslatedToUSB.Val;
+                    endpointBuffers[currentEndpoint].pBufWriteLocation += endpointBuffers[currentEndpoint].numOfMIDIPackets;
+
+                    if(endpointBuffers[currentEndpoint].pBufWriteLocation - endpointBuffers[currentEndpoint].bufferStart >= endpointBuffers[currentEndpoint].numOfMIDIPackets * MIDI_USB_BUFFER_SIZE)
+                    {
+                        endpointBuffers[currentEndpoint].pBufWriteLocation = endpointBuffers[currentEndpoint].bufferStart;
+                    }
+                    break;
+                }
+            }
+            else if(compareOSCAddress(msgSetCp)) // Channel Pressure
+            {
+                BYTE currentEndpoint;
+
+                BYTE ch = getIntArgumentAtIndex(0);
+                BYTE prs = getIntArgumentAtIndex(1);
+
+                OSCTranslatedToUSB.Val = 0;
+                OSCTranslatedToUSB.CableNumber = 0;
+                OSCTranslatedToUSB.CodeIndexNumber = MIDI_CIN_CHANNEL_PREASURE;
+                OSCTranslatedToUSB.DATA_0 = 0xD0 + ch;
+                OSCTranslatedToUSB.DATA_1 = prs;
+
+                for(currentEndpoint = 0; currentEndpoint < USBHostMIDINumberOfEndpoints(deviceHandle); currentEndpoint++)
+                {
+                    endpointBuffers[currentEndpoint].pBufWriteLocation->Val = OSCTranslatedToUSB.Val;
+                    endpointBuffers[currentEndpoint].pBufWriteLocation += endpointBuffers[currentEndpoint].numOfMIDIPackets;
+
+                    if(endpointBuffers[currentEndpoint].pBufWriteLocation - endpointBuffers[currentEndpoint].bufferStart >= endpointBuffers[currentEndpoint].numOfMIDIPackets * MIDI_USB_BUFFER_SIZE)
+                    {
+                        endpointBuffers[currentEndpoint].pBufWriteLocation = endpointBuffers[currentEndpoint].bufferStart;
+                    }
+                    break;
+                }
+            }
+            else if(compareOSCAddress(msgSetPb)) // Pitch Bend
+            {
+                BYTE currentEndpoint;
+
+                BYTE ch = getIntArgumentAtIndex(0);
+                BYTE msb = getIntArgumentAtIndex(1);
+                BYTE lsb = getIntArgumentAtIndex(2);
+
+                OSCTranslatedToUSB.Val = 0;
+                OSCTranslatedToUSB.CableNumber = 0;
+                OSCTranslatedToUSB.CodeIndexNumber = MIDI_CIN_PITCH_BEND_CHANGE;
+                OSCTranslatedToUSB.DATA_0 = 0xE0 + ch;
+                OSCTranslatedToUSB.DATA_1 = msb;
+                OSCTranslatedToUSB.DATA_2 = lsb;
+
+                for(currentEndpoint = 0; currentEndpoint < USBHostMIDINumberOfEndpoints(deviceHandle); currentEndpoint++)
+                {
+                    endpointBuffers[currentEndpoint].pBufWriteLocation->Val = OSCTranslatedToUSB.Val;
+                    endpointBuffers[currentEndpoint].pBufWriteLocation += endpointBuffers[currentEndpoint].numOfMIDIPackets;
+
+                    if(endpointBuffers[currentEndpoint].pBufWriteLocation - endpointBuffers[currentEndpoint].bufferStart >= endpointBuffers[currentEndpoint].numOfMIDIPackets * MIDI_USB_BUFFER_SIZE)
+                    {
+                        endpointBuffers[currentEndpoint].pBufWriteLocation = endpointBuffers[currentEndpoint].bufferStart;
+                    }
+                    break;
+                }
+            }
+        }
+        // CDC
+#if defined(USB_USE_CDC)
+        else if(compareOSCPrefix(cdcPrefix))
+        {
+            if(compareOSCAddress(msgSetData))
+            {
+                WORD data = 0;
+                cdcOutDataLength = getArgumentsLength();
+                if(cdcOutDataLength >= MAX_NO_OF_OUT_BYTES)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetData, ": too_many_arguments");
+                    return;
+                }
+
+                for(i = 0; i < cdcOutDataLength; i++)
+                {
+                    data = getIntArgumentAtIndex(i);
+                    if(data > 255)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetData, ": out_of_range_value");
+                        return;
+                    }
+                    USB_CDC_OUT_Data_Array[i] = (BYTE)data;
+                }
+
+                cdcSendFlag = TRUE;
+                APPL_CDC_State = READY_TO_TX_RX;
+
+                //_USBHostCDC_TerminateTransfer(USB_SUCCESS);
+            }
+        }
+#endif
         else if(compareOSCPrefix(sysPrefix))
         {
             // System Setting
@@ -2922,14 +4182,15 @@ void receiveOSCTask(void)
                 {
                     srcName = getStringArgumentAtIndex(0);
                     np = strstr(srcName, ".local");
-                    if(np == NULL)
+                    if(np != NULL)
                     {
-                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetHostName, ": wrong_argument_string");
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetHostName, ": please_delete_.local");
                         return;
                     }
 
-                    len = np - srcName;
-                    if(len >= 32)
+                    //len = np - srcName;
+                    //if(len >= 32)
+                    if(strlen(srcName) >= 32)
                     {
                         sendOSCMessage(sysPrefix, msgError, "ss", msgSetHostName, ": too_long_string");
                         return;
@@ -2947,16 +4208,19 @@ void receiveOSCTask(void)
                     return;
                 }
 
+                mDNSServiceDeRegister();
+
                 mDNSInitialize(getOSCHostName());
                 mDNSServiceRegister((const char *)getOSCHostName(), // base name of the service
                                     "_oscit._udp.local",    // type of the service
                                     8080,                   // TCP or UDP port, at which this service is available
                                     ((const BYTE *)""),     // TXT info
-                                    0,                      // auto rename the service when if needed
+                                    1,                      // auto rename the service when if needed
                                     NULL,                   // no callback function
                                     NULL                    // no application context
                     );
                 mDNSMulticastFilterRegister();
+                dwLastIP = 0;
                 sendOSCMessage(sysPrefix, msgConfiguration, "s", "succeeded");
             }
             else if(compareOSCAddress(msgGetHostName))
@@ -3131,6 +4395,28 @@ void receiveOSCTask(void)
     //mT5IntEnable(1);
 }
 
+/*******************************************************************************
+  Function:
+    void __ISR(_TIMER_4_VECTOR, ipl6) ledHandle(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void __ISR(_TIMER_4_VECTOR, ipl6) ledHandle(void)
 {
     static BYTE led_state = 0;
@@ -3147,6 +4433,12 @@ void __ISR(_TIMER_4_VECTOR, ipl6) ledHandle(void)
             if(getInitLatticeLedDrvFlag())
                 latticeLedHandle();
             
+            led_state = 2;
+            break;
+        case 2:
+            if(getInitLatticeRgbDrvFlag())
+                latticeRgbHandle();
+
             led_state = 0;
             break;
         default:
@@ -3157,6 +4449,28 @@ void __ISR(_TIMER_4_VECTOR, ipl6) ledHandle(void)
     mT4ClearIntFlag();
 }
 
+/*******************************************************************************
+  Function:
+    void __ISR(_TIMER_5_VECTOR, IPL5) sendOSCTask(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void __ISR(_TIMER_5_VECTOR, IPL5) sendOSCTask(void)
 {
     int i, j;
@@ -3192,7 +4506,7 @@ void __ISR(_TIMER_5_VECTOR, IPL5) sendOSCTask(void)
                 j = 0;
                 for(i = 0; i < AN_NUM; i++)
                 {
-                    if(analogEnable[i])
+                    if(getAnalogEnable(i))
                     {
                         analogInHandle(i, (LONG)ReadADC10(j));
                         j++;
@@ -3237,6 +4551,28 @@ void __ISR(_TIMER_5_VECTOR, IPL5) sendOSCTask(void)
     mT5ClearIntFlag();
 }
 
+/*******************************************************************************
+  Function:
+    void USBControlTask()
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void USBControlTask()
 {
     HIDControlTask();
@@ -3245,6 +4581,28 @@ void USBControlTask()
     //receiveMIDIDatas();
 }
 
+/*******************************************************************************
+  Function:
+    void HIDControlTask(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void HIDControlTask(void)
 {
     BYTE u8Data[128] = {0};
@@ -3277,13 +4635,13 @@ void HIDControlTask(void)
                         return;
 
                     if(state == 1)
-                        analogEnable[id] = TRUE;
+                        setAnalogEnable(id, TRUE);
                     else if(state == 0)
-                        analogEnable[id] = FALSE;
+                        setAnalogEnable(id, FALSE);
 
                     for(i = 0; i < AN_NUM; i++)
                     {
-                        if(analogEnable[i])
+                        if(getAnalogEnable(i))
                             anum++;
                     }
                     setAnPortDioType(id, IO_IN);
@@ -3328,8 +4686,8 @@ void HIDControlTask(void)
                     ToSendHidDataBuffer[0] = 0x80;
                     ToSendHidDataBuffer[1] = 3;
                     ToSendHidDataBuffer[2] = ReceivedHidDataBuffer[2];
-                    ToSendHidDataBuffer[3] = analogEnable[ReceivedHidDataBuffer[2]];
-                    ToSendHidDataBuffer[4] = getAnalogByte(ReceivedHidDataBuffer[2], MIDI_ORIGINAL);
+                    ToSendHidDataBuffer[3] = getAnalogEnable(ReceivedHidDataBuffer[2]);
+                    ToSendHidDataBuffer[4] = getAnalogByte(ReceivedHidDataBuffer[2], BYTE_ORIGINAL);
                     ToSendHidDataBuffer[5] = 0x00;
 
                     if(!USBHandleBusy(HIDTxHandle))
@@ -3958,6 +5316,28 @@ void HIDControlTask(void)
     }
 }
 
+/*******************************************************************************
+  Function:
+    void sendNote(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 #if 0
 void sendNote(void)
 {
@@ -3987,6 +5367,28 @@ void sendNote(void)
 }
 #endif
 
+/*******************************************************************************
+  Function:
+    void sendControlChange(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void sendControlChange(void)
 {
     int i;
@@ -3994,7 +5396,7 @@ void sendControlChange(void)
 
     for(i = 0; i < AN_NUM; i++)
     {
-        if(analogEnable[i])
+        if(getAnalogEnable(i))
         {
             analogInHandle(i, (LONG)ReadADC10(i));
 
@@ -4005,7 +5407,7 @@ void sendControlChange(void)
                 midiData.CodeIndexNumber = MIDI_CIN_CONTROL_CHANGE;
                 midiData.DATA_0 = 0xB0;
 
-                value = getAnalogByte(i, MIDI_ORIGINAL);
+                value = getAnalogByte(i, BYTE_ORIGINAL);
                 
                 midiData.DATA_1 = i;
                 midiData.DATA_2 = value;
@@ -4021,6 +5423,28 @@ void sendControlChange(void)
     }
 }
 
+/*******************************************************************************
+  Function:
+    void receiveMIDIDatas(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void receiveMIDIDatas(void)
 {
     int i;
@@ -4061,6 +5485,28 @@ void receiveMIDIDatas(void)
     }
 }
 
+/*******************************************************************************
+  Function:
+    void convertMidiToOsc(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void convertMidiToOsc(void)
 {
     BYTE currentEndpoint;
@@ -4154,6 +5600,7 @@ void convertMidiToOsc(void)
             }
             break;
         case STATE_ERROR:
+            LED_2_On();
             break;
         default:
             ProcState = STATE_INITIALIZE;
@@ -4161,7 +5608,29 @@ void convertMidiToOsc(void)
     }
 }
 
-#if 0 // hid
+#if defined(USB_USE_HID) // hid
+/*******************************************************************************
+  Function:
+    void convertHidToOsc(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
 void convertHidToOsc(void)
 {
     //App_Detect_Device();
@@ -4234,6 +5703,147 @@ void convertHidToOsc(void)
             break;
         default:
             break;       
+    }
+}
+#endif
+
+#if defined(USB_USE_CDC)
+/*******************************************************************************
+  Function:
+    void USBHostCDC_Clear_Out_DATA_Array(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
+void USBHostCDC_Clear_Out_DATA_Array(void)
+{
+    BYTE i;
+
+    for(i = 0; i < MAX_NO_OF_OUT_BYTES; i++)
+        USB_CDC_OUT_Data_Array[i] = 0;
+}
+
+/*******************************************************************************
+  Function:
+    void USB_CDC_RxTxHandler(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
+void USB_CDC_RxTxHandler(void)
+{
+    BYTE i;
+
+    if(!USBHostCDC_ApiDeviceDetect()) /* TRUE if device is enumerated without error */
+    {
+       APPL_CDC_State = DEVICE_NOT_CONNECTED;
+    }
+
+    switch(APPL_CDC_State)
+    {
+        case DEVICE_NOT_CONNECTED:
+            USBTasks();
+            if(USBHostCDC_ApiDeviceDetect()) /* TRUE if device is enumerated without error */
+            {
+                APPL_CDC_State = DEVICE_CONNECTED;
+            }
+            break;
+        case DEVICE_CONNECTED:
+            APPL_CDC_State = READY_TO_TX_RX;
+            break;
+        case GET_IN_DATA:
+            if(USBHostCDC_Api_Get_IN_Data(MAX_NO_OF_IN_BYTES, USB_CDC_IN_Data_Array))
+            {
+                APPL_CDC_State = GET_IN_DATA_WAIT;
+            }
+            else
+            {
+                APPL_CDC_State = READY_TO_TX_RX;
+            }
+            break;
+        case GET_IN_DATA_WAIT:
+            if(USBHostCDC_ApiTransferIsComplete(&ErrorDriver, &NumOfBytesRcvd))
+            {
+                if(!ErrorDriver)
+                {
+                    if(NumOfBytesRcvd > 0)
+                    {
+                        for(i = 0; i < NumOfBytesRcvd; i++)
+                        {
+                            sendOSCMessage(cdcPrefix, msgData, "iii", i, NumOfBytesRcvd, USB_CDC_IN_Data_Array[i]);
+                        }
+                    }
+                    APPL_CDC_State = READY_TO_TX_RX;
+                }
+                else
+                {
+                    APPL_CDC_State = READY_TO_TX_RX;
+                }
+            }
+            break;
+        case SEND_OUT_DATA:
+            if(USBHostCDC_Api_Send_OUT_Data(cdcOutDataLength, USB_CDC_OUT_Data_Array))
+            {
+                APPL_CDC_State = SEND_OUT_DATA_WAIT;
+            }
+            else
+            {
+                APPL_CDC_State = READY_TO_TX_RX;
+            }
+            break;
+        case SEND_OUT_DATA_WAIT:
+            if(USBHostCDC_ApiTransferIsComplete(&ErrorDriver, &NumOfBytesRcvd))
+            {
+                USBHostCDC_Clear_Out_DATA_Array();
+                APPL_CDC_State = READY_TO_TX_RX;
+
+                cdcSendFlag = FALSE;
+            }
+            break;
+        case READY_TO_TX_RX:
+
+            if(cdcSendFlag)
+            {
+                APPL_CDC_State = SEND_OUT_DATA;
+                //cdcSendFlag = FALSE;
+            }
+            else
+            {
+                APPL_CDC_State = READY_TO_TX_RX;
+            }
+            break;
+        default :
+            break;
     }
 }
 #endif
@@ -4695,7 +6305,7 @@ void USBCBSendResume(void)
   Remarks:
     None
 ***************************************************************************/
-#if 1
+#if defined(USB_USE_HID)
 void App_Detect_Device(void)
 {
   if(!USBHostHID_ApiDeviceDetect())
@@ -4724,7 +6334,7 @@ void App_Detect_Device(void)
   Remarks:
     None
 ***************************************************************************/
-#if 0// hid
+#if defined(USB_USE_HID)
 void App_ProcessInputReport(void)
 {
     BYTE  data;
@@ -4789,7 +6399,7 @@ void App_ProcessInputReport(void)
     assumes that Application is aware of report format of the attached
     device.
 ***************************************************************************/
-#if 1
+#if defined(USB_USE_HID)
 BOOL USB_HID_DataCollectionHandler(void)
 {
   BYTE NumOfReportItem = 0;
@@ -4963,6 +6573,43 @@ BOOL USB_ApplicationEventHandler ( BYTE address, USB_EVENT event, void *data, DW
     // Handle specific events.
     switch ((INT)event)
     {
+        case EVENT_VBUS_REQUEST_POWER:
+        case EVENT_VBUS_RELEASE_POWER:
+        case EVENT_HUB_ATTACH:
+        case EVENT_UNSUPPORTED_DEVICE:
+        case EVENT_CANNOT_ENUMERATE:
+        case EVENT_CLIENT_INIT_ERROR:
+        case EVENT_OUT_OF_MEMORY:
+        case EVENT_UNSPECIFIED_ERROR:   // This should never be generated.
+        case EVENT_SUSPEND:
+        case EVENT_DETACH:
+        case EVENT_RESUME:
+        case EVENT_BUS_ERROR:
+            return TRUE;
+            break;
+#if defined(USB_USE_HID)
+        case EVENT_HID_RPT_DESC_PARSED:
+            #ifdef APPL_COLLECT_PARSED_DATA
+                return(APPL_COLLECT_PARSED_DATA());
+            #else
+                return TRUE;
+            #endif
+            break;
+#elif defined(USB_USE_CDC)
+        case EVENT_CDC_NONE:
+        case EVENT_CDC_ATTACH:
+        case EVENT_CDC_COMM_READ_DONE:
+        case EVENT_CDC_COMM_WRITE_DONE:
+        case EVENT_CDC_DATA_READ_DONE:
+        case EVENT_CDC_DATA_WRITE_DONE:
+        case EVENT_CDC_RESET:
+            return TRUE;
+            break;
+        case EVENT_CDC_NAK_TIMEOUT:
+                APPL_CDC_State = READY_TO_TX_RX;
+                return TRUE;
+            break;
+#endif
         case EVENT_MIDI_ATTACH:
             deviceHandle = data;
             ProcState = STATE_READY;
@@ -5002,6 +6649,7 @@ BOOL USB_ApplicationEventHandler ( BYTE address, USB_EVENT event, void *data, DW
             }    
 
             return TRUE;
+            break;
         case EVENT_MIDI_DETACH:
             for( currentEndpoint = 0; currentEndpoint < USBHostMIDINumberOfEndpoints(deviceHandle); currentEndpoint++ )
             {
@@ -5017,28 +6665,8 @@ BOOL USB_ApplicationEventHandler ( BYTE address, USB_EVENT event, void *data, DW
             deviceHandle = NULL;
             ProcState = STATE_INITIALIZE;
             return TRUE;
-#if 1
-        case EVENT_HID_RPT_DESC_PARSED:
-            #ifdef APPL_COLLECT_PARSED_DATA
-                return(APPL_COLLECT_PARSED_DATA());
-            #else
-                return TRUE;
-            #endif
             break;
-#endif
         case EVENT_MIDI_TRANSFER_DONE:  // The main state machine will poll the driver.
-        case EVENT_VBUS_REQUEST_POWER:
-        case EVENT_VBUS_RELEASE_POWER:
-        case EVENT_HUB_ATTACH:
-        case EVENT_UNSUPPORTED_DEVICE:
-        case EVENT_CANNOT_ENUMERATE:
-        case EVENT_CLIENT_INIT_ERROR:
-        case EVENT_OUT_OF_MEMORY:
-        case EVENT_UNSPECIFIED_ERROR:   // This should never be generated.
-        case EVENT_SUSPEND:
-        case EVENT_DETACH:
-        case EVENT_RESUME:
-        case EVENT_BUS_ERROR:
             return TRUE;
             break;
         default:

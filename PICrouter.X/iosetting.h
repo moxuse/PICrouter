@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with PICrouter. if not, see <http:/www.gnu.org/licenses/>.
  *
- * iosetting.h,v.0.7.4 2013/05/04
+ * iosetting.h,v.0.7.7 2013/07/10
  */
 
 #ifndef IOSETTING_H
@@ -30,11 +30,17 @@
 #include <string.h>
 #include "HardwareProfile.h"
 
+// SPI
 #define SPI_2 2
 #define SPI_4 4
 #define putcSPI4(data_out)  do{while(!SPI4STATbits.SPITBE); SPI4BUF=(data_out); }while(0)
 #define DataRdySPI4() (SPI4STATbits.SPIRBF)
 #define	ReadSPI4()	(SPI4BUF)
+
+// I2C
+#define I2C_3 3
+#define I2C_4 4
+#define I2C_5 5
 
 #define AN_NUM  14
 #define PWM_NUM 4
@@ -42,7 +48,7 @@
 #define SPI_NUM 6
 
 #define TIMER4_COUNT 500
-#define TIMER5_COUNT 2000
+#define TIMER5_COUNT 1000 // 2000
 
 extern BYTE ioAnPort[14];
 extern BYTE ioPwmPort[4];
@@ -79,11 +85,21 @@ BYTE inputSpiPort(char* name);
 
 void sendSpiOneWord(BYTE spi_id, WORD msb, DWORD usec);
 void sendSpiTwoWord(BYTE spi_id, WORD msb, WORD lsb, DWORD usec);
+void sendSpiThreeWord(BYTE spi_id, WORD msb0, WORD lsb0, WORD msb1, DWORD usec);
 void sendSpiFourWord(BYTE spi_id, WORD msb0, WORD lsb0, WORD msb1, WORD lsb1, DWORD usec);
 
 WORD receiveSpiOneWord(BYTE spi_id, DWORD usec);
 
 unsigned int getcSPI4(void);
+
+void idleI2C(BYTE i2c_id);
+BOOL startI2C(BYTE i2c_id);
+void setAddressToI2C(BYTE i2c_id, BYTE data, char chflag);
+void setDataToI2C(BYTE i2c_id, BYTE data);
+BOOL checkAckI2C(BYTE i2c_id);
+void restartI2C(BYTE i2c_id);
+void stopI2C(BYTE i2c_id);
+BYTE getDataFromI2C(BYTE i2c_id);
 
 #endif	/* IOSETTING_H */
 

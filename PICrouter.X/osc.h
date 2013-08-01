@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with PICrouter. if not, see <http:/www.gnu.org/licenses/>.
  *
- * osc.h,v.1.0.8 2013/05/25
+ * osc.h,v.1.2.1 2013/07/19
  */
 
 #ifndef OSC_H
@@ -56,6 +56,18 @@ extern const char msgGetLatticeLedIntensity[];
 extern const char msgLatticeLedIntensityAll[];
 extern const char msgGetLatticeLedIntensityAll[];
 
+// for RGB_PAD_16
+extern const char msgLatticeRgbDrvPinSelect[];
+extern const char msgSetLatticeRgb[];
+extern const char msgSetLatticeRgbColumn[];
+extern const char msgSetLatticeRgbRow[];
+extern const char msgSetLatticeRgbAll[];
+extern const char msgLatticeRgbClear[];
+extern const char msgLatticeRgbIntensity[];
+extern const char msgGetLatticeRgbIntensity[];
+extern const char msgLatticeRgbIntensityAll[];
+extern const char msgGetLatticeRgbIntensityAll[];
+
 // for LED_ENC_32 or LED_ENC_ABS_32
 extern const char msgRotaryLedDrvPinSelect[];
 //extern const char msgRotaryLedStep[];
@@ -92,6 +104,12 @@ extern const char msgAdc[];
 extern const char msgAdcEnable[];
 extern const char msgSetAdcEnable[];
 extern const char msgGetAdcEnable[];
+extern const char msgAdcType[];
+extern const char msgSetAdcType[];
+extern const char msgGetAdcType[];
+extern const char msgAdcCurve[];
+extern const char msgSetAdcCurve[];
+extern const char msgGetAdcCurve[];
 extern const char msgAdcDio[];
 extern const char msgSetAdcDio[];
 extern const char msgGetAdcDio[];
@@ -133,12 +151,20 @@ extern const char msgGetSpiDio[];
 extern const char msgSetSpiDo[];
 extern const char msgSpiDi[];
 extern const char msgGetSpiDi[];
+// for I2C
+extern const char msgEnableI2c[];
+extern const char msgSetI2cConfig[];
+extern const char msgSetI2cFreq[];
+extern const char msgSetI2cSlaveAddress[];
+extern const char msgI2cData[];
+extern const char msgSetI2cData[];
+extern const char msgGetI2cData[];
 
 extern const char msgSetLcdConfig[];
 extern const char msgSetLcdText[];
 extern const char msgClearLcdText[];
 
-// OSC Messages converted from MIDI Message
+// OSC Messages converted from MIDI Messages
 extern const char midiPrefix[];
 extern const char msgSetNote[];
 extern const char msgNote[];
@@ -152,8 +178,13 @@ extern const char msgSetKp[];
 extern const char msgKp[];
 extern const char msgSetCp[];
 extern const char msgCp[];
-extern const char msgGetPb[];
+extern const char msgSetPb[];
 extern const char msgPb[];
+
+// OSC Messages converted from CDC Messages
+extern const char cdcPrefix[];
+extern const char msgSetData[];
+extern const char msgData[];
 
 // System OSC Messages for Network Settings
 extern const char sysPrefix[];
