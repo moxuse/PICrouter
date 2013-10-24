@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with PICrouter. if not, see <http:/www.gnu.org/licenses/>.
  *
- * picrouter.c,v.1.7.1 2013/07/19
+ * picrouter.c,v.1.10.1 2013/09/06
  */
 
 #include "picrouter.h"
@@ -71,11 +71,16 @@ int main(int argc, char** argv) {
     // PWM
     freq = 10000; // 10kHz
     width = GetSystemClock() / freq;
+#if 0//c99
+    for(int i0 = 0; i0 < PWM_NUM; i0++)
+        duty[i0] = 50;
+#else
     for(i = 0; i < PWM_NUM; i++)
         duty[i] = 50;
+#endif
 
     setOSCPrefix("/std");
-    setOSCHostName(DEFAULT_HOST_NAME);
+    setOSCHostName(getOSCHostName());
 
     // USB Initialization
     #if defined(USE_USB_BUS_SENSE_IO)
@@ -89,9 +94,9 @@ int main(int argc, char** argv) {
     TickInit();
     InitAppConfig();
     StackInit();
-    ZeroconfLLInitialize();
-    mDNSInitialize(DEFAULT_HOST_NAME);
-    mDNSServiceRegister((const char *)DEFAULT_HOST_NAME, // base name of the service
+    //syama ZeroconfLLInitialize();
+    mDNSInitialize(getOSCHostName());
+    mDNSServiceRegister((const char *)getOSCHostName(), // base name of the service
                         "_oscit._udp.local",       // type of the service
                         8080,                      // TCP or UDP port, at which this service is available
                         ((const BYTE *)""),        // TXT info
@@ -143,15 +148,15 @@ int main(int argc, char** argv) {
                             eth_state = 1;
                             break;
                         case 1:
-#endif
                             ZeroconfLLProcess();
                             eth_state = 1;// 2;
                             break;
                         case 1:// 2:
+#endif
                             mDNSProcess();
-                            eth_state = 2;// 3;
+                            eth_state = 1;// 3;
                             break;
-                        case 2:// 3:
+                        case 1:// 3:
                             DHCPServerTask();
                             eth_state = 0;
                             break;
@@ -195,16 +200,16 @@ int main(int argc, char** argv) {
                             eth_state = 1;
                             break;
                         case 1:
-#endif
                             ZeroconfLLProcess();
                             eth_state = 1;// 2;
                             break;
                         case 1:// 2:
+#endif
                             mDNSProcess();
-                            eth_state = 2;// 3;
+                            eth_state = 1;// 3;
                             break;
-                        case 2:// 3:
-                            //DHCPServerTask();
+                        case 1:// 3:
+                            DHCPServerTask();
                             eth_state = 0;
                             break;
                     }
@@ -2725,6 +2730,7 @@ void receiveOSCTask(void)
                     setLatticePadPortLoadName(name_load);
                     setPortIOType(name_load, IO_OUT);
                     outputPort(name_load, LOW);
+                    //setLatticeRgbLedNumber(num, lnum);
 
                     switch(num)
                     {
@@ -2752,6 +2758,84 @@ void receiveOSCTask(void)
                     return;
                 }
             }
+            else if(compareOSCAddress(msgSetLatticeRgbConnectedNum))
+            {
+                if(getArgumentsLength() < 1)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbConnectedNum, ": too_few_arguments");
+                    return;
+                }
+                if(compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f'))
+                {
+                    int num = getIntArgumentAtIndex(0);
+                    if(num < 1)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbConnectedNum, ": out_of_range_value");
+                        return;
+                    }
+                    setNumConnectedLatticeRgb(num);
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbConnectedNum, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgGetLatticeRgbConnectedNum))
+            {
+                sendOSCMessage(getOSCPrefix(), msgLatticeRgbConnectedNum, "i", getNumConnectedLatticeRgb());
+            }
+            else if(compareOSCAddress(msgSetLatticeRgbSize))
+            {
+                if(getArgumentsLength() < 2)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbSize, ": too_few_arguments");
+                    return;
+                }
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) && (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')))
+                {
+                    BYTE index = getIntArgumentAtIndex(0);
+                    BYTE size = getIntArgumentAtIndex(1);
+
+                    if(index > 3 || !(size == 8 || size == 16))
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgLatticeRgbDrvPinSelect, ": too_long_string_length");
+                        return;
+                    }
+
+                    setLatticeRgbLedNumber(index, size);
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbSize, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgGetLatticeRgbSize))
+            {
+                if(getArgumentsLength() < 1)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbSize, ": too_few_arguments");
+                    return;
+                }
+                if(compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f'))
+                {
+                    BYTE index = getIntArgumentAtIndex(0);
+
+                    if(index > 3)
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgLatticeRgbDrvPinSelect, ": too_long_string_length");
+                        return;
+                    }
+
+                    sendOSCMessage(getOSCPrefix(), msgLatticeRgbSize, "ii", index, getLatticeRgbLedNumber(index));
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgbSize, ": wrong_argument_type");
+                    return;
+                }
+            }
             else if(compareOSCAddress(msgSetLatticeRgb))
             {
                 if(getArgumentsLength() < 5)
@@ -2773,6 +2857,7 @@ void receiveOSCTask(void)
                     BYTE intensity;
                     WORD pos = (1 << y) << (x * 4);
 
+
                     if(x > 3 || y > 3 || state > 1)
                     {
                         sendOSCMessage(sysPrefix, msgError, "ss", msgSetLatticeRgb, ": out_of_range_value");
@@ -2788,6 +2873,7 @@ void receiveOSCTask(void)
                             intensity = getIntArgumentAtIndex(5);
                             if(intensity > 100)
                                 intensity = 100;
+
                             setLatticeRgbIntensity(index, layer, y + (x * 4), intensity);
                         }
                         else
@@ -4241,8 +4327,8 @@ void receiveOSCTask(void)
             }
             else if(compareOSCAddress(msgGetHostMac))
             {
-                char macaddr[17] = {0};
-                sprintf(macaddr, "%X:%X:%X:%X:%X:%X", AppConfig.MyMACAddr.v[0], AppConfig.MyMACAddr.v[1], AppConfig.MyMACAddr.v[2], AppConfig.MyMACAddr.v[3], AppConfig.MyMACAddr.v[4], AppConfig.MyMACAddr.v[5]);
+                char macaddr[18] = {0};
+                sprintf(macaddr, "%02X:%02X:%02X:%02X:%02X:%02X", AppConfig.MyMACAddr.v[0], AppConfig.MyMACAddr.v[1], AppConfig.MyMACAddr.v[2], AppConfig.MyMACAddr.v[3], AppConfig.MyMACAddr.v[4], AppConfig.MyMACAddr.v[5]);
                 sendOSCMessage(sysPrefix, msgHostMac, "s", macaddr);
             }
             else if(compareOSCAddress(msgSetHostPort))
@@ -4294,6 +4380,31 @@ void receiveOSCTask(void)
             {
                 sendOSCMessage(sysPrefix, msgPrefix, "s", getOSCPrefix());
             }
+            else if(compareOSCAddress(msgDiscoverDevices))
+            {
+                char hip[22], rip[24], macaddr[26], hport[14], rport[16];
+
+                mT5IntEnable(0);
+
+                closeOSCSendPort();
+
+                sprintf(hip, "HostIP=%d.%d.%d.%d", AppConfig.MyIPAddr.v[0], AppConfig.MyIPAddr.v[1], AppConfig.MyIPAddr.v[2], AppConfig.MyIPAddr.v[3]);
+                sprintf(rip, "RemoteIP=%d.%d.%d.%d", getRemoteIpAtIndex(0), getRemoteIpAtIndex(1), getRemoteIpAtIndex(2), getRemoteIpAtIndex(3));
+                sprintf(macaddr, "HostMAC=%02X:%02X:%02X:%02X:%02X:%02X", AppConfig.MyMACAddr.v[0], AppConfig.MyMACAddr.v[1], AppConfig.MyMACAddr.v[2], AppConfig.MyMACAddr.v[3], AppConfig.MyMACAddr.v[4], AppConfig.MyMACAddr.v[5]);
+                sprintf(hport, "HostPort=%d", getLocalPort());
+                sprintf(rport, "RemotePort=%d", getRemotePort());
+
+                while(!getInitDiscoverFlag())
+                    setInitDiscoverFlag(openDiscoverPort());
+
+                while(!isDiscoverPutReady());
+
+                sendOSCMessage(sysPrefix, msgDiscoveredDevice, "sssss", hip, macaddr, hport, rip, rport);
+
+                closeDiscoverPort();
+
+                mT5IntEnable(1);
+            }
             else if(compareOSCAddress(msgSwitchUsbMode))
             {
                 char* dm;
@@ -4329,6 +4440,81 @@ void receiveOSCTask(void)
                     sendOSCMessage(sysPrefix, msgUsbMode, "s", "device");
                 else if(device_mode == MODE_HOST)
                     sendOSCMessage(sysPrefix, msgUsbMode, "s", "host");
+            }
+            else if(compareOSCAddress(msgWriteNvmData))
+            {
+                if(getArgumentsLength() < 2)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgWriteNvmData, ": too_few_arguments");
+                    return;
+                }
+                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) && (compareTypeTagAtIndex(1, 'i') || compareTypeTagAtIndex(1, 'f')))
+                {
+                    WORD address = getIntArgumentAtIndex(0);
+                    WORD data = getIntArgumentAtIndex(1);
+
+                    if(address >= 1 && address <=7)
+                    {
+                        if(!NVMWriteWord((void*)(NVM_DATA + 512 * address), data))
+                            sendOSCMessage(sysPrefix, msgNvmData, "s", "write:succeeded");
+                        else
+                            sendOSCMessage(sysPrefix, msgNvmData, "s", "write:failed");
+                    }
+                    else
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgWriteNvmData, ": out_of_range_address");
+                        return;
+                    }
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgWriteNvmData, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgReadNvmData))
+            {
+                if(getArgumentsLength() < 1)
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgReadNvmData, ": too_few_arguments");
+                    return;
+                }
+                if(compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f'))
+                {
+                    DWORD tmpData = 0;
+                    WORD address = getIntArgumentAtIndex(0);
+
+
+                    if(address >= 1 && address <=7)
+                    {
+                        tmpData = *(DWORD *)(NVM_DATA + 512 * address);
+                        sendOSCMessage(sysPrefix, msgNvmData, "ii", address, tmpData);
+                    }
+                    else
+                    {
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgReadNvmData, ": out_of_range_address");
+                        return;
+                    }
+                }
+                else
+                {
+                    sendOSCMessage(sysPrefix, msgError, "ss", msgReadNvmData, ": wrong_argument_type");
+                    return;
+                }
+            }
+            else if(compareOSCAddress(msgClearNvmData))
+            {
+                BYTE index, checkstate = 0;
+                NVMErasePage((void *)NVM_DATA);
+                for(index = 1; index <= 7; index++)
+                {
+                    checkstate += NVMWriteWord((void*)(NVM_DATA + 512 * index), 0);
+                    DelayMs(1);
+                }
+                if(!checkstate)
+                    sendOSCMessage(sysPrefix, msgNvmData, "s", "clear:succeeded");
+                else
+                    sendOSCMessage(sysPrefix, msgNvmData, "s", "clear:failed");
             }
             else if(compareOSCAddress(msgSoftReset))
             {

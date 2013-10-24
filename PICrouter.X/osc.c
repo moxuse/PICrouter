@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with PICrouter. if not, see <http:/www.gnu.org/licenses/>.
  *
- * osc.c,v.1.2.1 2013/07/19
+ * osc.c,v.1.5.1 2013/09/06
  */
 
 #include "osc.h"
@@ -24,14 +24,17 @@
 // Network
 static UDP_SOCKET RxSocket;
 static UDP_SOCKET TxSocket;
+static UDP_SOCKET DiscoverSocket;
 static BOOL initReceiveFlag = FALSE;
 static BOOL initSendFlag = FALSE;
+static BOOL initDiscoverFlag = FALSE;
 static BOOL chCompletedFlag = FALSE;
-static char* hostName = NULL;
+static char hostName[17] = "picrouter";
 static char* stdPrefix = NULL;
 
 // Remote IP Address Initialization
 static BYTE remoteIP[] = {224ul, 0ul, 0ul, 1ul};
+//static BYTE remoteIP[] = {192ul, 168ul, 111ul, 21ul};
 
 // Port Number Initialization
 static WORD remotePort = 8000;
@@ -62,8 +65,14 @@ const char msgGetLatticeLedIntensity[]    = "/lattice/led/intensity/get";
 const char msgLatticeLedIntensityAll[]    = "/lattice/led/intensity/all";
 const char msgGetLatticeLedIntensityAll[] = "/lattice/led/intensity/all/get";
 
-// for RGB_PAD_16
+// for RGB_PAD_16/RGB_PAD_8
 const char msgLatticeRgbDrvPinSelect[]    = "/lattice/rgb/driver/pin/select";
+const char msgLatticeRgbConnectedNum[]    = "/lattice/rgb/num";
+const char msgSetLatticeRgbConnectedNum[] = "/lattice/rgb/num/set";
+const char msgGetLatticeRgbConnectedNum[] = "/lattice/rgb/num/get";
+const char msgLatticeRgbSize[]            = "/lattice/rgb/size";
+const char msgSetLatticeRgbSize[]         = "/lattice/rgb/size/set";
+const char msgGetLatticeRgbSize[]         = "/lattice/rgb/size/get";
 const char msgSetLatticeRgb[]             = "/lattice/rgb/set";
 const char msgSetLatticeRgbColumn[]       = "/lattice/rgb/col/set";
 const char msgSetLatticeRgbRow[]          = "/lattice/rgb/row/set";
@@ -194,35 +203,41 @@ const char msgSetData[] = "/data/set";
 const char msgData[]    = "/data";
 
 //System OSC Messages for Network Settings (25)
-const char sysPrefix[]        = "/sys";
-const char msgPrefix[]        = "/prefix";
-const char msgSetPrefix[]     = "/prefix/set";
-const char msgGetPrefix[]     = "/prefix/get";
-const char msgRemoteIp[]      = "/remote/ip";
-const char msgSetRemoteIp[]   = "/remote/ip/set";
-const char msgGetRemoteIp[]   = "/remote/ip/get";
-const char msgRemotePort[]    = "/remote/port";
-const char msgSetRemotePort[] = "/remote/port/set";
-const char msgGetRemotePort[] = "/remote/port/get";
-const char msgHostName[]      = "/host/name";
-const char msgSetHostName[]   = "/host/name/set";
-const char msgGetHostName[]   = "/host/name/get";
-const char msgHostIp[]        = "/host/ip";
-const char msgGetHostIp[]     = "/host/ip/get";
-const char msgHostMac[]       = "/host/mac";
-const char msgGetHostMac[]    = "/host/mac/get";
-const char msgHostPort[]      = "/host/port";
-const char msgSetHostPort[]   = "/host/port/set";
-const char msgGetHostPort[]   = "/host/port/get";
-const char msgUsbMode[]       = "/usb/mode";
-const char msgSwitchUsbMode[] = "/usb/mode/switch";
-const char msgGetUsbMode[]    = "/usb/mode/get";
-const char msgSoftReset[]     = "/soft/reset";
-const char msgConfiguration[] = "/configuration";
-const char msgDebug[]         = "/debug";
-const char msgError[]         = "/error";
-const char msgVersion[]       = "/version";
-const char msgGetVersion[]    = "/version/get";
+const char sysPrefix[]           = "/sys";
+const char msgPrefix[]           = "/prefix";
+const char msgSetPrefix[]        = "/prefix/set";
+const char msgGetPrefix[]        = "/prefix/get";
+const char msgRemoteIp[]         = "/remote/ip";
+const char msgSetRemoteIp[]      = "/remote/ip/set";
+const char msgGetRemoteIp[]      = "/remote/ip/get";
+const char msgRemotePort[]       = "/remote/port";
+const char msgSetRemotePort[]    = "/remote/port/set";
+const char msgGetRemotePort[]    = "/remote/port/get";
+const char msgHostName[]         = "/host/name";
+const char msgSetHostName[]      = "/host/name/set";
+const char msgGetHostName[]      = "/host/name/get";
+const char msgHostIp[]           = "/host/ip";
+const char msgGetHostIp[]        = "/host/ip/get";
+const char msgHostMac[]          = "/host/mac";
+const char msgGetHostMac[]       = "/host/mac/get";
+const char msgHostPort[]         = "/host/port";
+const char msgSetHostPort[]      = "/host/port/set";
+const char msgGetHostPort[]      = "/host/port/get";
+const char msgUsbMode[]          = "/usb/mode";
+const char msgSwitchUsbMode[]    = "/usb/mode/switch";
+const char msgGetUsbMode[]       = "/usb/mode/get";
+const char msgNvmData[]          = "/nvm/data";
+const char msgWriteNvmData[]     = "/nvm/data/write";
+const char msgReadNvmData[]      = "/nvm/data/read";
+const char msgClearNvmData[]     = "/nvm/data/clear";
+const char msgSoftReset[]        = "/soft/reset";
+const char msgConfiguration[]    = "/configuration";
+const char msgDiscoverDevices[]  = "/discover/devices";
+const char msgDiscoveredDevice[] = "/discovered/device";
+const char msgDebug[]            = "/debug";
+const char msgError[]            = "/error";
+const char msgVersion[]          = "/version";
+const char msgGetVersion[]       = "/version/get";
 
 // for touchOSC
 const char toscPrefix[] = "/tosc";
@@ -409,6 +424,60 @@ void setInitSendFlag(BOOL flag)
 BOOL getInitSendFlag(void)
 {
     return initSendFlag;
+}
+
+/*******************************************************************************
+  Function:
+    void setInitDiscoverFlag(BOOL flag)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    BOOL flag
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
+void setInitDiscoverFlag(BOOL flag)
+{
+    initDiscoverFlag = flag;
+}
+
+/*******************************************************************************
+  Function:
+    BOOL getInitDiscoverFlag(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
+BOOL getInitDiscoverFlag(void)
+{
+    return initDiscoverFlag;
 }
 
 /*******************************************************************************
@@ -762,8 +831,13 @@ void clearOSCPrefix(void)
 *******************************************************************************/
 void setOSCHostName(char* host_name)
 {
-    hostName = (char *)calloc(strlen(host_name), sizeof(char));
-    memcpy(hostName, host_name, strlen(host_name));
+    BYTE hnlen = strlen(host_name);
+    //hostName = (char *)calloc(strlen(host_name), sizeof(char));
+    memset(hostName, 0, MAX_HOST_NAME_LEN + 1);
+    if(hnlen <= MAX_HOST_NAME_LEN)
+        memcpy(hostName, host_name, hnlen);
+    else
+        memcpy(hostName, host_name, MAX_HOST_NAME_LEN);
 }
 
 /*******************************************************************************
@@ -817,8 +891,9 @@ char* getOSCHostName(void)
 *******************************************************************************/
 void clearOSCHostName(void)
 {
-    free(hostName);
-    hostName = NULL;
+    memset(hostName, 0, MAX_HOST_NAME_LEN + 1);
+    //free(hostName);
+    //hostName = NULL;
 }
 
 /*******************************************************************************
@@ -846,9 +921,6 @@ void clearOSCHostName(void)
 *******************************************************************************/
 BOOL openOSCSendPort(BYTE* ip_address, WORD port_number)
 {
-#if 0
-    TxSocket = UDPOpenEx((ip_address[0] | (ip_address[1] << 8) | (ip_address[2] << 16) | (ip_address[3] << 24)), UDP_OPEN_IP_ADDRESS, 0, port_number);
-#else
     if(ip_address[0] == 224 && ip_address[1] == 0 && ip_address[2] == 0)
     {
         NODE_INFO mcRemote;
@@ -871,7 +943,6 @@ BOOL openOSCSendPort(BYTE* ip_address, WORD port_number)
     {
         TxSocket = UDPOpenEx((ip_address[0] | (ip_address[1] << 8) | (ip_address[2] << 16) | (ip_address[3] << 24)), UDP_OPEN_IP_ADDRESS, 0, port_number);
     }
-#endif
 
     if(TxSocket == INVALID_UDP_SOCKET)
         return FALSE;
@@ -906,6 +977,37 @@ BOOL openOSCReceivePort(WORD port_number)
     RxSocket = UDPOpen(port_number, NULL, 0);
 
     if(RxSocket == INVALID_UDP_SOCKET)
+        return FALSE;
+
+    return TRUE;
+}
+
+/*******************************************************************************
+  Function:
+    BOOL openDiscoverPort(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
+BOOL openDiscoverPort(void)
+{
+    DiscoverSocket = UDPOpenEx(0, UDP_OPEN_SERVER, 2860, 30303);
+    if(DiscoverSocket == INVALID_UDP_SOCKET)
         return FALSE;
 
     return TRUE;
@@ -963,6 +1065,33 @@ BOOL isOSCSendPortOpened(void)
 BOOL isOSCReceivePortOpened(void)
 {
     return UDPIsOpened(RxSocket);
+}
+
+/*******************************************************************************
+  Function:
+    BOOL isDiscoverPortOpened(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
+BOOL isDiscoverPortOpened(void)
+{
+    return UDPIsOpened(DiscoverSocket);
 }
 
 /*******************************************************************************
@@ -1025,6 +1154,35 @@ void closeOSCReceivePort(void)
 
 /*******************************************************************************
   Function:
+    void closeDiscoverPort(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+    None
+
+  Remarks:
+    None
+*******************************************************************************/
+void closeDiscoverPort(void)
+{
+    initDiscoverFlag = FALSE;
+    UDPClose(DiscoverSocket);
+    DiscoverSocket = 0;
+}
+
+/*******************************************************************************
+  Function:
     BOOL isOSCGetReady(void)
 
   Precondition:
@@ -1082,6 +1240,37 @@ BOOL isOSCPutReady(void)
 
     return TRUE;
 }
+
+/*******************************************************************************
+  Function:
+    BOOL isDiscoverPutReady(void)
+
+  Precondition:
+
+
+  Summary:
+
+
+  Description:
+
+
+  Parameters:
+    None
+
+  Return Values:
+
+
+  Remarks:
+    None
+*******************************************************************************/
+BOOL isDiscoverPutReady(void)
+{
+    if(!UDPIsPutReady(DiscoverSocket))
+        return FALSE;
+
+    return TRUE;
+}
+
 
 /*******************************************************************************
   Function:
@@ -1439,10 +1628,10 @@ void sendOSCMessage(const char* prefix, const char* command, const char* type, .
     char* fchar = NULL;
     char* cstr = NULL;
     int cstr_len = 0;
-    char str[128];
-    memset(str, 0, 128);
+    char str[MAX_MESSAGE_LEN];
+    memset(str, 0, MAX_MESSAGE_LEN);
 
-    if(isOSCPutReady())
+    if(isOSCPutReady() || isDiscoverPutReady())
     {
         //debug LED_1_On();
 
@@ -1585,8 +1774,8 @@ void appendOSCMessageToBundle(const char* prefix, const char* command, const cha
     char* fchar = NULL;
     char* cstr = NULL;
     int cstr_len = 0;
-    char str[128];
-    memset(str, 0, 128);
+    char str[MAX_MESSAGE_LEN];
+    memset(str, 0, MAX_MESSAGE_LEN);
 
     sprintf(str, "%s%s", prefix, command);
 

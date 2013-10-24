@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with PICrouter. if not, see <http:/www.gnu.org/licenses/>.
  *
- * osc.h,v.1.2.1 2013/07/19
+ * osc.h,v.1.5.1 2013/09/06
  */
 
 #ifndef OSC_H
@@ -29,10 +29,10 @@
 #include "TCPIP Stack/TCPIP.h"
 #include "HardwareProfile.h"
 
-#define DEFAULT_HOST_NAME "picrouter"
-
+#define MAX_HOST_NAME_LEN 16
 #define MAX_BUF_SIZE    64
 #define MAX_PACKET_SIZE 320// 1024
+#define MAX_MESSAGE_LEN 160
 #define MAX_ADDRESS_LEN 64
 #define MAX_ARGS_LEN 40
 
@@ -56,8 +56,14 @@ extern const char msgGetLatticeLedIntensity[];
 extern const char msgLatticeLedIntensityAll[];
 extern const char msgGetLatticeLedIntensityAll[];
 
-// for RGB_PAD_16
+// for RGB_PAD_16/RGB_PAD_8
 extern const char msgLatticeRgbDrvPinSelect[];
+extern const char msgLatticeRgbConnectedNum[];
+extern const char msgSetLatticeRgbConnectedNum[];
+extern const char msgGetLatticeRgbConnectedNum[];
+extern const char msgLatticeRgbSize[];
+extern const char msgSetLatticeRgbSize[];
+extern const char msgGetLatticeRgbSize[];
 extern const char msgSetLatticeRgb[];
 extern const char msgSetLatticeRgbColumn[];
 extern const char msgSetLatticeRgbRow[];
@@ -210,8 +216,14 @@ extern const char msgGetHostPort[];
 extern const char msgSwitchUsbMode[];
 extern const char msgUsbMode[];
 extern const char msgGetUsbMode[];
+extern const char msgNvmData[];
+extern const char msgWriteNvmData[];
+extern const char msgReadNvmData[];
+extern const char msgClearNvmData[];
 extern const char msgSoftReset[];
 extern const char msgConfiguration[];
+extern const char msgDiscoverDevices[];
+extern const char msgDiscoveredDevice[];
 extern const char msgDebug[];
 extern const char msgError[];
 extern const char msgVersion[];
@@ -239,6 +251,8 @@ void setInitReceiveFlag(BOOL flag);
 BOOL getInitReceiveFlag(void);
 void setInitSendFlag(BOOL flag);
 BOOL getInitSendFlag(void);
+void setInitDiscoverFlag(BOOL flag);
+BOOL getInitDiscoverFlag(void);
 void setChCompletedFlag(BOOL flag);
 BOOL getChCompletedFlag(void);
 
@@ -258,13 +272,17 @@ char* getOSCHostName(void);
 void clearOSCHostName(void);
 BOOL openOSCSendPort(BYTE* ip_address, WORD port_number);
 BOOL openOSCReceivePort(WORD localPort);
+BOOL openDiscoverPort(void);
 BOOL isOSCSendPortOpened(void);
 BOOL isOSCReceivePortOpened(void);
+BOOL isDiscoverPortOpend(void);
 void closeOSCSendPort(void);
 void closeOSCReceivePort(void);
+void closeDiscoverPort(void);
 
 BOOL isOSCGetReady(void);
 BOOL isOSCPutReady(void);
+BOOL isDiscoverPutReady(void);
 
 void getOSCPacket(void);
 BOOL processOSCPacket(void);
