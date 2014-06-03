@@ -16,10 +16,10 @@
  * You should have received a copy of the GNU General Public License
  * along with PICrouter. if not, see <http:/www.gnu.org/licenses/>.
  *
- * picrouter.h,v.1.10.1 2013/09/06
+ * picrouter.h,v.1.13.0 2014/04/24
  */
 
-#define CURRENT_VERSION "1.10.1"
+#define CURRENT_VERSION "1.13.0"
 
 #include <plib.h>
 #include <stdio.h>
@@ -29,19 +29,7 @@
 #include "TimeDelay.h"
 
 #include "HardwareProfile.h"
-#include "usb_config.h"
-#include "USB/usb.h"
-#include "USB/usb_function_hid.h"
-#include "USB/usb_function_midi.h"
-#include "USB/usb_host_midi.h"
-#if defined(USB_USE_HID) // hid host
-    #include "USB/usb_host_hid_parser.h"
-    #include "USB/usb_host_hid.h"
-#endif
-#if defined(USB_USE_CDC) // cdc host
-    #include "USB/usb_host_cdc.h"
-    #include "USB/usb_host_cdc_interface.h"
-#endif
+#include "usb_callback.h"
 
 #include "TCPIP Stack/TCPIP.h"
 #include "TCPIP Stack/ZeroconfMulticastDNS.h"
@@ -52,7 +40,55 @@
 #include "encoder.h"
 #include "osc.h"
 
+//#define USE_SPI_SRAM
+#ifdef USE_SPI_SRAM
+#include "sram.h"
+#endif
+
+//#define USE_RN131
+#if defined(USE_RN131)
+  #define config1 UART_EN | UART_RX_TX | UART_DIS_LOOPBACK | UART_DIS_ABAUD | \
+                  UART_MODE_SIMPLEX | UART_NO_PAR_8BIT | UART_NORMAL_RX | UART_BRGH_FOUR
+  #define config2 UART_INT_TX | UART_TX_ENABLE | UART_RX_ENABLE
+#if 1//BRGH=1
+  #define baud230400 86   //80000000 / (4 * 230400) - 1 = 230.4kbps@80MHz
+  #define baud115200 173  //80000000 / (4 * 115200) - 1 = 115.2kbps@80MHz
+  #define baud57600  346  //80000000 / (4 * 57600) - 1 = 57.6kbps@80MHz
+  #define baud38400  519  //80000000 / (4 * 38400) - 1 = 38.4kbps@80MHz
+  #define baud19200  1041 //80000000 / (4 * 19200) - 1 = 19.2kbps@80MHz
+  #define baud9600   2082 //80000000 / (4 * 9600) - 1 = 9.6kbps@80MHz
+  #define baud4800   4166 //80000000 / (4 * 4800) - 1 = 4.8kbps@80MHz
+#else//BRGH=0
+  #define baud230400 21   //80000000 / (16 * 230400) - 1 = 230.4kbps@80MHz
+  #define baud115200 42   //80000000 / (16 * 115200) - 1 = 115.2kbps@80MHz
+  #define baud57600  86   //80000000 / (16 * 57600) - 1 = 57.6kbps@80MHz
+  #define baud38400  129  //80000000 / (16 * 38400) - 1 = 38.4kbps@80MHz
+  #define baud19200  259  //80000000 / (16 * 19200) - 1 = 19.2kbps@80MHz
+  #define baud9600   520  //80000000 / (16 * 9600) - 1 = 9.6kbps@80MHz
+  #define baud4800   1040 //80000000 / (16 * 4800) - 1 = 4.8kbps@80MHz
+#endif
+  //#define configint UART_ERR_INT_DIS | UART_RX_INT_DIS | UART_TX_INT_DIS
+  #define configint UART_ERR_INT_EN | UART_RX_INT_EN | UART_INT_PR6 | UART_INT_SUB_PR3 | UART_TX_INT_DIS
+#endif
+
+//#define USE_PITCH
+
+//#define USE_LCD
+
+// LED_PAD_8 or LED_PAD_16
+//#define USE_LED_PAD
+
+// RGB_PAD_8 or RGB_PAD_16
+//#define USE_RGB_PAD
+
+// LED_ENC(incremental type)
+//#define USE_INC_ENC
+
+// LED_ENC(absolute type)
+//#define USE_ABS_ENC
+
 /** CONFIGURATION **************************************************/
+/*
 #pragma config UPLLEN    = ON       // USB PLL Enabled
 #pragma config FPLLMUL   = MUL_20   // PLL Multiplier
 #pragma config UPLLIDIV  = DIV_5    // USB PLL Input Divider
@@ -67,6 +103,7 @@
 #pragma config ICESEL    = ICS_PGx1 // ICE/ICD Comm Channel Select
 #pragma config FMIIEN    = OFF      // external PHY in RMII/default configuration
 #pragma config FETHIO    = ON
+*/
 
 /** DEFINITIONS ****************************************************/
 //#define NVM_PROGRAM_PAGE 0xbd006000
@@ -76,153 +113,53 @@
 /** VARIABLES ******************************************************/
 
 //for USB_MIDI
-USB_HANDLE MIDITxHandle = NULL;
-USB_HANDLE MIDIRxHandle  = NULL;
-unsigned char ReceivedHidDataBuffer[64];
-unsigned char ToSendHidDataBuffer[64];
-
-//for USB_HID
-USB_HANDLE HIDTxHandle = NULL;
-USB_HANDLE HIDRxHandle = NULL;
-unsigned char ReceivedMidiDataBuffer[64];
-unsigned char ToSendMidiDataBuffer[64];
 USB_AUDIO_MIDI_EVENT_PACKET midiData;
-
-// Host
-typedef enum
-{
-    MODE_DEVICE,
-    MODE_HOST,
-    MODE_UNKNOWN
-} DEVICE_MODE;
 
 //static DEVICE_MODE device_mode = MODE_DEVICE;
 static DEVICE_MODE device_mode = MODE_HOST;
 
-#if defined(USB_USE_HID)//hid
-    #define MINIMUM_POLL_INTERVAL           (0x0A)        // Minimum Polling rate for HID reports is 10ms
+#if defined(USB_USE_HID)
+#define MINIMUM_POLL_INTERVAL           (0x0A)        // Minimum Polling rate for HID reports is 10ms
 
-    #define USAGE_PAGE_BUTTONS              (0x09)
+#define USAGE_PAGE_BUTTONS              (0x09)
+#define USAGE_PAGE_GEN_DESKTOP          (0x01)
 
-    #define USAGE_PAGE_GEN_DESKTOP          (0x01)
+APP_STATE App_State_Mouse = DEVICE_NOT_CONNECTED;
 
-    #define MAX_ERROR_COUNTER               (10)
+HID_DATA_DETAILS Appl_Mouse_Buttons_Details;
+HID_DATA_DETAILS Appl_XY_Axis_Details;
 
-    typedef enum _APP_STATE
-    {
-        DEVICE_NOT_CONNECTED,
-        DEVICE_CONNECTED, /* Device Enumerated  - Report Descriptor Parsed */
-        READY_TO_TX_RX_REPORT,
-        GET_INPUT_REPORT, /* perform operation on received report */
-        INPUT_REPORT_PENDING,
-        ERROR_REPORTED
-    } APP_STATE;
+HID_REPORT_BUFFER  Appl_raw_report_buffer;
 
-    #if 0
-    typedef struct _HID_REPORT_BUFFER
-    {
-        WORD  Report_ID;
-        WORD  ReportSize;
-        //BYTE* ReportData;
-        BYTE  ReportData[4];
-        WORD  ReportPollRate;
-    }   HID_REPORT_BUFFER;
+HID_USER_DATA_SIZE Appl_Button_report_buffer[3];
+HID_USER_DATA_SIZE Appl_XY_report_buffer[3];
 
-    APP_STATE App_State_Mouse = DEVICE_NOT_CONNECTED;
-
-    HID_DATA_DETAILS Appl_Mouse_Buttons_Details;
-    HID_DATA_DETAILS Appl_XY_Axis_Details;
-
-    HID_REPORT_BUFFER  Appl_raw_report_buffer;
-
-    HID_USER_DATA_SIZE Appl_Button_report_buffer[3];
-    HID_USER_DATA_SIZE Appl_XY_report_buffer[3];
-    #endif
-
-    BYTE ErrorDriver;
-    BYTE ErrorCounter;
-    BYTE NumOfBytesRcvd;
-
-    BOOL ReportBufferUpdated;
-
-#elif defined(USB_USE_CDC)
-    typedef enum _APPL_STATE
-    {
-        DEVICE_NOT_CONNECTED,
-        DEVICE_CONNECTED, /* Device Enumerated  - Report Descriptor Parsed */
-        READY_TO_TX_RX,
-        GET_IN_DATA,
-        GET_IN_DATA_WAIT,
-        SEND_OUT_DATA,
-        SEND_OUT_DATA_WAIT,
-        ERROR_REPORTED      /* need to add application states for data interface */
-    } APPL_STATE;
-
-    #define MAX_NO_OF_IN_BYTES  64
-    #define MAX_NO_OF_OUT_BYTES 64
-
-    volatile APPL_STATE  APPL_CDC_State;
-
-    BYTE USB_CDC_IN_Data_Array[MAX_NO_OF_IN_BYTES];
-    BYTE USB_CDC_OUT_Data_Array[MAX_NO_OF_OUT_BYTES];
+BYTE ErrorCounter;
+BOOL ReportBufferUpdated;
 #endif
 
+// CDC(Host)
+#if defined(USB_USE_CDC)
+BYTE USB_CDC_IN_Data_Array[MAX_NO_OF_IN_BYTES];
+BYTE USB_CDC_OUT_Data_Array[MAX_NO_OF_OUT_BYTES];
 
-#define MIDI_USB_BUFFER_SIZE     (BYTE)4
-#define MIDI_UART_BUFFER_SIZE    (BYTE)64
-#define NUM_MIDI_PKTS_IN_USB_PKT (BYTE)1
+BOOL cdcSendFlag = FALSE;
+WORD cdcReceiveInterval = 0;
+BYTE cdcOutDataLength;
+#endif
 
-USB_AUDIO_MIDI_PACKET RxHostMidiDataBuffer;
-USB_AUDIO_MIDI_PACKET TxHostMidiDataBuffer;
+BYTE ErrorDriver;
+BYTE NumOfBytesRcvd;
 
 BOOL bUsbHostInitialized = FALSE;
 
-typedef enum
-{
-    STATE_INITIALIZE = 0,
-    STATE_IDLE,
-    STATE_READY,
-    STATE_ERROR
-} PROC_STATE;
-
-typedef enum
-{
-    TX_DATA = 0,
-    TX_DATA_WAIT,
-    RX_DATA,
-    RX_DATA_WAIT,
-    TX_REAL_TIME_DATA,
-    TX_REAL_TIME_DATA_WAIT
-} TX_RX_STATE;
-
-typedef struct
-{
-    TX_RX_STATE             TransferState;      // The transfer state of the endpoint
-    BYTE                    numOfMIDIPackets;   // Each USB Packet sent from a device has the possibility of holding more than one MIDI packet,
-                                                //  so this is to keep track of how many MIDI packets are within a USB packet (between 1 and 16, or 4 and 64 bytes)
-    USB_AUDIO_MIDI_PACKET*  bufferStart;        // The 2D buffer for the endpoint. There are MIDI_USB_BUFFER_SIZE USB buffers that are filled with numOfMIDIPackets
-                                                //  MIDI packets. This allows for MIDI_USB_BUFFER_SIZE USB packets to be saved, with a possibility of up to
-                                                //  numOfMIDIPackets MID packets within each USB packet.
-    USB_AUDIO_MIDI_PACKET*  pBufReadLocation;   // Pointer to USB packet that is being read from
-    USB_AUDIO_MIDI_PACKET*  pBufWriteLocation;  // Pointer to USB packet that is being written to
-} ENDPOINT_BUFFER;
-
-void* deviceHandle; // Handle to the attached device
-PROC_STATE ProcState;
-ENDPOINT_BUFFER* endpointBuffers;
-
-// MIDI packet used to translate MIDI UART to MIDI USB, with flag
+// MIDI packet used to translate OSC to USB_MIDI(Host), with flag
+#if defined(USB_USE_MIDI)
 USB_AUDIO_MIDI_PACKET OSCTranslatedToUSB;
-
-BYTE midiType = 0;
-BYTE midiCh   = 0;
-BYTE midiNum  = 0;
-BYTE midiVal  = 0;
-
-USB_VOLATILE BYTE msCounter;
+#endif
 
 //PWM
-BOOL onTimer23 = FALSE;
+BOOL onTimer2 = FALSE;
 BOOL onSquare[PWM_NUM];
 LONG freq;
 LONG width;
@@ -242,8 +179,6 @@ void USBControlTask(void);
 void HIDControlTask(void);
 void convertMidiToOsc(void);
 void convertHidToOsc(void);
-void sendNote(void);
-void sendControlChange(void);
 void receiveMIDIDatas(void);
 
 #if defined(USB_USE_HID)
@@ -251,12 +186,5 @@ void receiveMIDIDatas(void);
     void App_ProcessInputReport(void);
     BOOL USB_HID_DataCollectionHandler(void);
 #elif defined(USB_USE_CDC)
-    BOOL cdcSendFlag = FALSE;
-    WORD cdcReceiveInterval = 0;
-    BYTE cdcOutDataLength;
-    BYTE ErrorDriver;
-    BYTE NumOfBytesRcvd;
-
-    void USBHostCDC_Clear_Out_DATA_Array(void);
     void USB_CDC_RxTxHandler(void);
 #endif

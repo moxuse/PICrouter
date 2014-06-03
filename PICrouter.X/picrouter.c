@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with PICrouter. if not, see <http:/www.gnu.org/licenses/>.
  *
- * picrouter.c,v.1.10.1 2013/09/06
+ * picrouter.c,v.1.13.0 2014/04/24
  */
 
 #include "picrouter.h"
@@ -34,11 +34,11 @@ void _general_exception_handler(unsigned cause, unsigned status)
 int main(int argc, char** argv) {
     int i;
     BYTE eth_state = 0;
-
+    
     // Enable optimal performance
     SYSTEMConfigPerformance(GetSystemClock());
     mOSCSetPBDIV(OSC_PB_DIV_1); // Use 1:1 CPU Core:Peripheral clocks
-
+    
     // Enable the cache for the best performance
     CheKseg0CacheOn();
 
@@ -46,16 +46,20 @@ int main(int argc, char** argv) {
     mJTAGPortEnable(DEBUG_JTAGPORT_OFF);
 
     OpenTimer4(T4_ON | T4_SOURCE_INT | T4_PS_1_8, TIMER4_COUNT);
-    ConfigIntTimer4(T4_INT_ON | T4_INT_PRIOR_6);
+    ConfigIntTimer4(T4_INT_ON | T4_INT_PRIOR_5);
 
     OpenTimer5(T5_ON | T5_SOURCE_INT | T5_PS_1_8, TIMER5_COUNT);
-    ConfigIntTimer5(T5_INT_ON | T5_INT_PRIOR_5);
+    ConfigIntTimer5(T5_INT_ON | T5_INT_PRIOR_4);
 
     // Port Initialization
     initIOPorts();
     initAnalogVariables();
     initEncoderVariables();
-    
+
+#ifdef USE_SPI_SRAM
+    initSPI2ForSRAM();
+#endif
+
     initSW();
     initLEDs();
     buttonInit();
@@ -64,8 +68,8 @@ int main(int argc, char** argv) {
     prevState = 1;
     currentState = 1;
 
-    LED_1_On();
-    LED_2_On();
+    turnOnLED1();
+    turnOnLED2();
     DelayMs(200);
 
     // PWM
@@ -79,18 +83,84 @@ int main(int argc, char** argv) {
         duty[i] = 50;
 #endif
 
+#if defined(USE_RN131)
+    turnOnLED1();
+    turnOnLED2();
+    DelayMs(3000);
+    turnOffLED1();
+    turnOffLED2();
+
+    // the C13 pin is connected to RESET pin of the WiFly RN-131C.
+    outputPort("c13", LOW);
+    DelayMs(100);
+    outputPort("c13", HIGH);
+    DelayMs(500);
+
+    // if the SW1 is pushed, the following configuration commands are sent.
+    if(!getSW1State())
+    {
+        U2MODE = 0x00008208;
+        U2STA = 0x00000400;
+        U2BRG = baud9600;// baud115200;
+
+        DelayMs(500);
+        sendCommandToRN134("$$$");
+        sendCommandToRN134("factory RESET\r");
+        sendCommandToRN134("set uart baud 230400\r\n");
+        //sendCommandToRN134("set uart baud 115200\r\n");
+        //sendCommandToRN134("set uart baud 57600\r\n");
+        //sendCommandToRN134("set uart baud 38400\r");
+        //sendCommandToRN134("set uart baud 19200\r");
+        //sendCommandToRN134("set uart baud 9600\r");
+        //sendCommandToRN134("set uart baud 4800\r\n");
+        sendCommandToRN134("set uart flow 0x01");
+        sendCommandToRN134("set wlan join 1\r");
+        sendCommandToRN134("set wlan auth 3\r");
+        sendCommandToRN134("set wlan ssid YOUR_SSID\r");
+        sendCommandToRN134("set wlan pass YOUR_PASSWORD\r");
+        sendCommandToRN134("set ip host YOUR_IP\r");
+        sendCommandToRN134("set ip protocol 1\r");
+        sendCommandToRN134("set ip remote 10001\r");
+        sendCommandToRN134("set ip localport 10100\r");
+        sendCommandToRN134("set broadcast interval 0\r");
+        sendCommandToRN134("set comm remote 0\r");
+        sendCommandToRN134("set comm open 0\r");
+        sendCommandToRN134("save\r");
+        sendCommandToRN134("reboot\r");
+    }
+
+    U2MODE = 0x00008208;
+    U2STA = 0x00001400;
+    U2BRG = baud230400;
+    ConfigIntUART2(configint);
+#endif
+
     setOSCPrefix("/std");
-    setOSCHostName(getOSCHostName());
+    setOSCHostName("picrouter");
 
     // USB Initialization
-    #if defined(USE_USB_BUS_SENSE_IO)
-        tris_usb_bus_sense = 1;
-    #endif
+#if defined(USE_USB_BUS_SENSE_IO)
+    tris_usb_bus_sense = 1;
+#endif
 
-    #if defined(USE_SELF_POWER_SENSE_IO)
-        tris_self_power = 1;
-    #endif
+#if defined(USE_SELF_POWER_SENSE_IO)
+    tris_self_power = 1;
+#endif
 
+#if defined(USE_PITCH)
+    AD1PCFG = 0x0000FFFC;// 0000 0000 0000 0000 1111 1111 1111 1100
+    AD1CON2 = 0x0000041C;// 0000 0000 0000 0000 0000 0100 0001 1100
+    AD1CSSL = 0x00000003;// 0000 0000 0000 0000 0000 0000 0000 0011
+
+    AD1CON1 = 0x000010E6;// 0000 0000 0000 0000 1000 0000 0110 0110
+    AD1CHS  = 0x00000000;// 0000 0000 0000 0000 0000 0000 0000 0000
+    AD1CON3 = 0x00001F08;// 0000 0000 0000 0000 0000 1111 0000 1000
+    AD1CON1bits.ON = 1;
+
+    setAnalogEnable(0, TRUE);
+    setAnalogEnable(1, TRUE);
+#endif
+    
     TickInit();
     InitAppConfig();
     StackInit();
@@ -109,13 +179,13 @@ int main(int argc, char** argv) {
     // Enable multi-vectored interrupts
     INTEnableSystemMultiVectoredInt();
 
-    LED_1_Off();
-    LED_2_Off();
+    turnOffLED1();
+    turnOffLED2();
     DelayMs(200);
-
+    
     while(1)
     {
-        currentState = SW_State();
+        currentState = getSW1State();
 
         if(prevState != currentState)
         {
@@ -125,131 +195,133 @@ int main(int argc, char** argv) {
 
         switch(device_mode)
         {
-            case MODE_DEVICE:
-                for(i = 0; i < 3; i++)
+        case MODE_DEVICE:
+            for(i = 0; i < 3; i++)
+            {
+                turnOnLED1();
+                DelayMs(200);
+                turnOffLED1();
+                DelayMs(200);
+            }
+            
+            USBDeviceInit();
+            
+            while(device_mode == MODE_DEVICE)
+            {
+                // Ethernet Tasks
+                StackTask();
+                switch(eth_state)
                 {
-                    LED_1_On();
-                    DelayMs(200);
-                    LED_1_Off();
-                    DelayMs(200);
-                }
-
-                USBDeviceInit();
-
-                while(device_mode == MODE_DEVICE)
-                {
-                    // Ethernet Tasks
-                    StackTask();
-                    switch(eth_state)
-                    {
-                        case 0:
+                case 0:
 #if 0
-                            NBNSTask();
-                            eth_state = 1;
-                            break;
-                        case 1:
-                            ZeroconfLLProcess();
-                            eth_state = 1;// 2;
-                            break;
-                        case 1:// 2:
+                    NBNSTask();
+                    eth_state = 1;
+                    break;
+                case 1:
+                    ZeroconfLLProcess();
+                    eth_state = 1;// 2;
+                    break;
+                case 1:// 2:
 #endif
-                            mDNSProcess();
-                            eth_state = 1;// 3;
-                            break;
-                        case 1:// 3:
-                            DHCPServerTask();
-                            eth_state = 0;
-                            break;
-                    }
-                    if(dwLastIP != AppConfig.MyIPAddr.Val)
-                    {
-                        dwLastIP = AppConfig.MyIPAddr.Val;
-                        mDNSFillHostRecord();
-                    }
-                    
-                    receiveOSCTask();
-
-                    // USB Tasks
-                    USBDeviceTasks();
-                    USBControlTask();
-
-                    if(U1OTGSTATbits.SESVD == 0)
-                    {
-                        USBSoftDetach();
-                        //test device_mode = MODE_UNKNOWN;
-                    }
+                    mDNSProcess();
+                    eth_state = 1;// 3;
+                    break;
+                case 1:// 3:
+                    DHCPServerTask();
+                    eth_state = 0;
+                    break;
                 }
-                break;
-            case MODE_HOST:
-                for(i = 0; i < 3; i++)
+                if(dwLastIP != AppConfig.MyIPAddr.Val)
                 {
-                    LED_2_On();
-                    DelayMs(200);
-                    LED_2_Off();
-                    DelayMs(200);
+                    dwLastIP = AppConfig.MyIPAddr.Val;
+                    mDNSFillHostRecord();
                 }
-
-                while(device_mode == MODE_HOST)
+                
+                receiveOSCTask();
+                
+                // USB Tasks
+                USBDeviceTasks();
+                USBControlTask();
+                
+                if(U1OTGSTATbits.SESVD == 0)
                 {
-                    StackTask();
-                    switch(eth_state)
-                    {
-                        case 0:
+                    USBSoftDetach();
+                    //test device_mode = MODE_UNKNOWN;
+                }
+            }
+            break;
+        case MODE_HOST:
+            for(i = 0; i < 3; i++)
+            {
+                turnOnLED2();
+                DelayMs(200);
+                turnOffLED2();
+                DelayMs(200);
+            }
+            
+            while(device_mode == MODE_HOST)
+            {
+                StackTask();
+                switch(eth_state)
+                {
+                case 0:
 #if 0
-                            NBNSTask();
-                            eth_state = 1;
-                            break;
-                        case 1:
-                            ZeroconfLLProcess();
-                            eth_state = 1;// 2;
-                            break;
-                        case 1:// 2:
+                    NBNSTask();
+                    eth_state = 1;
+                    break;
+                case 1:
+                    ZeroconfLLProcess();
+                    eth_state = 1;// 2;
+                    break;
+                case 1:// 2:
 #endif
-                            mDNSProcess();
-                            eth_state = 1;// 3;
-                            break;
-                        case 1:// 3:
-                            DHCPServerTask();
-                            eth_state = 0;
-                            break;
-                    }
-                    if(dwLastIP != AppConfig.MyIPAddr.Val)
-                    {
-                        dwLastIP = AppConfig.MyIPAddr.Val;
-                        mDNSFillHostRecord();
-                    }
+                    mDNSProcess();
+                    eth_state = 1;// 3;
+                    break;
+                case 1:// 3:
+                    DHCPServerTask();
+                    eth_state = 0;
+                    break;
+                }
+                if(dwLastIP != AppConfig.MyIPAddr.Val)
+                {
+                    dwLastIP = AppConfig.MyIPAddr.Val;
+                    mDNSFillHostRecord();
+                }
+                
+                receiveOSCTask();
+                
+                if(bUsbHostInitialized)
+                {
+                    USBTasks();
 
-                    receiveOSCTask();
-
-                    if(bUsbHostInitialized)
-                    {
-                        USBTasks();
-
-                        convertMidiToOsc();
+#if defined(USB_USE_MIDI)
+                    convertMidiToOsc();
+#endif
 
 #if defined(USB_USE_HID)
-                        convertHidToOsc();
+                    convertHidToOsc();
 #elif defined(USB_USE_CDC)
-                        USB_CDC_RxTxHandler();
-
-                        if(cdcReceiveInterval < 16384)
-                            cdcReceiveInterval++;
-                        else if(cdcReceiveInterval == 16384)
-                        {
-                            if(APPL_CDC_State == READY_TO_TX_RX)
-                                APPL_CDC_State = GET_IN_DATA;
-                            cdcReceiveInterval = 0;
-                        }
-#endif
-                    }
-                    else
+                    USB_CDC_RxTxHandler();
+                    
+                    if(cdcReceiveInterval < 16384)
+                        cdcReceiveInterval++;
+                    else if(cdcReceiveInterval == 16384)
                     {
-                        bUsbHostInitialized = USBHostInit(0);
+                        if(getApplCDCState() == READY_TO_TX_RX)
+                            setApplCDCState(GET_IN_DATA);
+                        cdcReceiveInterval = 0;
                     }
+#endif
                 }
-                break;
-            default:
-                break;
+                else
+                {
+                    bUsbHostInitialized = USBHostInit(0);
+                }
+            }
+            break;
+        default:
+            break;
         }        
     }
     return (EXIT_SUCCESS);
@@ -287,6 +359,26 @@ void initIOPorts(void)
     for(i = 0; i < 14; i++)
         setAnPortDioType(i, IO_IN);
 
+#if defined(USE_PITCH)
+    //for pitch
+    setAnPortDioType(0, IO_IN);
+    setAnPortDioType(1, IO_IN);
+    for(i = 2; i < 14; i++)
+        setAnPortDioType(i, IO_OUT);
+
+    outputPort("b2", LOW);
+    outputPort("b3", LOW);
+    outputPort("b4", LOW);
+    outputPort("b5", LOW);
+    outputPort("b6", LOW);
+    outputPort("b7", LOW);
+    outputPort("b8", LOW);
+    outputPort("b9", LOW);
+    outputPort("b10", LOW);
+    outputPort("b11", LOW);
+    outputPort("b12", LOW);
+#endif
+
     for(i = 0; i < 4; i++)
     {
         setPwmPortDioType(i, IO_OUT);
@@ -298,6 +390,26 @@ void initIOPorts(void)
         setDigitalPortDioType(i, IO_OUT);
         outputDigitalPort(i, LOW);
     }
+
+#if defined(USE_PITCH)
+    setDigitalPortDioType(0, IO_OUT);
+    outputDigitalPort(0, LOW);
+    setDigitalPortDioType(0, IO_OUT);
+    outputDigitalPort(0, LOW);
+
+    setPortIOType("f0", IO_IN);
+    setPortIOType("f1", IO_OUT);
+    outputPort("f1", LOW);
+    setPortIOType("b14", IO_IN);
+    setPortIOType("f4", IO_OUT);
+    outputPort("f4", LOW);
+    setPortIOType("f5", IO_IN);
+    setPortIOType("g6", IO_OUT);
+    outputPort("g6", LOW);
+    setPortIOType("g7", IO_IN);
+    setPortIOType("g8", IO_OUT);
+    outputPort("g8", LOW);
+#endif
 
     setSpiPortDioType("sck2", IO_OUT);
     setSpiPortDioType("sdi2", IO_OUT);
@@ -364,11 +476,11 @@ void receiveOSCTask(void)
                 {
                     if(!strcmp(getStringArgumentAtIndex(1), "on"))
                     {
-                        LED_1_On();
+                        turnOnLED1();
                     }
                     else if(!strcmp(getStringArgumentAtIndex(1), "off"))
                     {
-                        LED_1_Off();
+                        turnOffLED1();
                     }
                     else
                         sendOSCMessage(sysPrefix, msgError, "ss", msgOnboardLed, ": wrong_argument_string");
@@ -377,11 +489,11 @@ void receiveOSCTask(void)
                 {
                     if(!strcmp(getStringArgumentAtIndex(1), "on"))
                     {
-                        LED_2_On();
+                        turnOnLED2();
                     }
                     else if(!strcmp(getStringArgumentAtIndex(1), "off"))
                     {
-                        LED_2_Off();
+                        turnOffLED2();
                     }
                     else
                         sendOSCMessage(sysPrefix, msgError, "ss", msgOnboardLed, ": wrong_argument_string");
@@ -813,24 +925,24 @@ void receiveOSCTask(void)
                 if(strcmp(state, "on") == 0)
                 {
                     LONG w = (LONG)(((float)duty[index] / 100.0) * (float)width);
-                    if(!onTimer23)
+                    if(!onTimer2)
                     {
-                        OpenTimer23(T23_ON | T23_SOURCE_INT | T23_PS_1_1, width);
-                        onTimer23 = TRUE;
+                        OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, width);
+                        onTimer2 = TRUE;
                     }
                     switch(index)
                     {
                         case 0:
-                            OpenOC1(OC_ON | OC_TIMER_MODE32 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
+                            OpenOC1(OC_ON | OC_TIMER_MODE16 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
                             break;
                         case 1:
-                            OpenOC3(OC_ON | OC_TIMER_MODE32 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
+                            OpenOC3(OC_ON | OC_TIMER_MODE16 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
                             break;
                         case 2:
-                            OpenOC4(OC_ON | OC_TIMER_MODE32 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
+                            OpenOC4(OC_ON | OC_TIMER_MODE16 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
                             break;
                         case 3:
-                            OpenOC5(OC_ON | OC_TIMER_MODE32 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
+                            OpenOC5(OC_ON | OC_TIMER_MODE16 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
                             break;
                     }
                     onSquare[index] = TRUE;
@@ -838,10 +950,10 @@ void receiveOSCTask(void)
                 else if(strcmp(state, "off") == 0)
                 {
                     onSquare[index] = FALSE;
-                    if(onTimer23 && (!onSquare[0] && !onSquare[1] && !onSquare[2] && !onSquare[3]))
+                    if(onTimer2 && (!onSquare[0] && !onSquare[1] && !onSquare[2] && !onSquare[3]))
                     {
-                        CloseTimer23();
-                        onTimer23 = FALSE;
+                        CloseTimer2();
+                        onTimer2 = FALSE;
                     }
                     switch(index)
                     {
@@ -883,6 +995,9 @@ void receiveOSCTask(void)
             }
             else if(compareOSCAddress(msgSetPwmFreq))
             {
+                WORD index;
+                WORD period;//syama0
+
                 if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')))
                     freq = getIntArgumentAtIndex(0);
                 else
@@ -895,17 +1010,28 @@ void receiveOSCTask(void)
                 {
                     freq = 20;
                 }
-                else if(freq > 44100)
+                else if(freq > 20000)
                 {
-                    freq = 44100;
+                    freq = 20000;
                 }
                 T2CONbits.TON = 0;
                 TMR2 = 0;
                 OC1CONbits.OCM = 0b000;
+                OC3CONbits.OCM = 0b000;
+                OC4CONbits.OCM = 0b000;
+                OC5CONbits.OCM = 0b000;
+
                 width = GetSystemClock() / freq;
                 PR2 = width;
                 OC1RS = width / 2;
+                OC3RS = width / 2;
+                OC4RS = width / 2;
+                OC5RS = width / 2;
+
                 OC1CONbits.OCM = 0b110;
+                OC3CONbits.OCM = 0b110;
+                OC4CONbits.OCM = 0b110;
+                OC5CONbits.OCM = 0b110;
                 T2CONbits.TON = 1;
             }
             else if(compareOSCAddress(msgGetPwmFreq))
@@ -2089,6 +2215,190 @@ void receiveOSCTask(void)
                 else
                     sendOSCMessage(sysPrefix, msgError, "ss", msgGetI2cData, ": wrong_argument_type");
             }
+#if defined(USE_PITCH)
+            else if(compareOSCAddress("/volume/led/len/set"))
+            {
+                BYTE val = getIntArgumentAtIndex(0);
+                //if(type == 1)
+                {
+                    switch(val)
+                    {
+                    case 0:
+                        outputPort("b2", LOW);
+                        outputPort("b3", LOW);
+                        outputPort("b4", LOW);
+                        outputPort("b5", LOW);
+                        outputPort("b6", LOW);
+                        outputPort("b7", LOW);
+                        outputPort("b8", LOW);
+                        outputPort("b9", LOW);
+                        outputPort("b10", LOW);
+                        outputPort("b11", LOW);
+                        outputPort("b12", LOW);
+                        break;
+                    case 1:
+                        outputPort("b2", HIGH);
+                        outputPort("b3", LOW);
+                        outputPort("b4", LOW);
+                        outputPort("b5", LOW);
+                        outputPort("b6", LOW);
+                        outputPort("b7", LOW);
+                        outputPort("b8", LOW);
+                        outputPort("b9", LOW);
+                        outputPort("b10", LOW);
+                        outputPort("b11", LOW);
+                        outputPort("b12", LOW);
+                        break;
+                    case 2:
+                        outputPort("b2", HIGH);
+                        outputPort("b3", HIGH);
+                        outputPort("b4", LOW);
+                        outputPort("b5", LOW);
+                        outputPort("b6", LOW);
+                        outputPort("b7", LOW);
+                        outputPort("b8", LOW);
+                        outputPort("b9", LOW);
+                        outputPort("b10", LOW);
+                        outputPort("b11", LOW);
+                        outputPort("b12", LOW);
+                        break;
+                    case 3:
+                        outputPort("b2", HIGH);
+                        outputPort("b3", HIGH);
+                        outputPort("b4", HIGH);
+                        outputPort("b5", LOW);
+                        outputPort("b6", LOW);
+                        outputPort("b7", LOW);
+                        outputPort("b8", LOW);
+                        outputPort("b9", LOW);
+                        outputPort("b10", LOW);
+                        outputPort("b11", LOW);
+                        outputPort("b12", LOW);
+                        break;
+                    case 4:
+                        outputPort("b2", HIGH);
+                        outputPort("b3", HIGH);
+                        outputPort("b4", HIGH);
+                        outputPort("b5", HIGH);
+                        outputPort("b6", LOW);
+                        outputPort("b7", LOW);
+                        outputPort("b8", LOW);
+                        outputPort("b9", LOW);
+                        outputPort("b10", LOW);
+                        outputPort("b11", LOW);
+                        outputPort("b12", LOW);
+                        break;
+                    case 5:
+                        outputPort("b2", HIGH);
+                        outputPort("b3", HIGH);
+                        outputPort("b4", HIGH);
+                        outputPort("b5", HIGH);
+                        outputPort("b6", HIGH);
+                        outputPort("b7", LOW);
+                        outputPort("b8", LOW);
+                        outputPort("b9", LOW);
+                        outputPort("b10", LOW);
+                        outputPort("b11", LOW);
+                        outputPort("b12", LOW);
+                        break;
+                    case 6:
+                        outputPort("b2", HIGH);
+                        outputPort("b3", HIGH);
+                        outputPort("b4", HIGH);
+                        outputPort("b5", HIGH);
+                        outputPort("b6", HIGH);
+                        outputPort("b7", HIGH);
+                        outputPort("b8", LOW);
+                        outputPort("b9", LOW);
+                        outputPort("b10", LOW);
+                        outputPort("b11", LOW);
+                        outputPort("b12", LOW);
+                        break;
+                    case 7:
+                        outputPort("b2", HIGH);
+                        outputPort("b3", HIGH);
+                        outputPort("b4", HIGH);
+                        outputPort("b5", HIGH);
+                        outputPort("b6", HIGH);
+                        outputPort("b7", HIGH);
+                        outputPort("b8", HIGH);
+                        outputPort("b9", LOW);
+                        outputPort("b10", LOW);
+                        outputPort("b11", LOW);
+                        outputPort("b12", LOW);
+                        break;
+                    case 8:
+                        outputPort("b2", HIGH);
+                        outputPort("b3", HIGH);
+                        outputPort("b4", HIGH);
+                        outputPort("b5", HIGH);
+                        outputPort("b6", HIGH);
+                        outputPort("b7", HIGH);
+                        outputPort("b8", HIGH);
+                        outputPort("b9", HIGH);
+                        outputPort("b10", LOW);
+                        outputPort("b11", LOW);
+                        outputPort("b12", LOW);
+                        break;
+                    case 9:
+                        outputPort("b2", HIGH);
+                        outputPort("b3", HIGH);
+                        outputPort("b4", HIGH);
+                        outputPort("b5", HIGH);
+                        outputPort("b6", HIGH);
+                        outputPort("b7", HIGH);
+                        outputPort("b8", HIGH);
+                        outputPort("b9", HIGH);
+                        outputPort("b10", HIGH);
+                        outputPort("b11", LOW);
+                        outputPort("b12", LOW);
+                        break;
+                    case 10:
+                        outputPort("b2", HIGH);
+                        outputPort("b3", HIGH);
+                        outputPort("b4", HIGH);
+                        outputPort("b5", HIGH);
+                        outputPort("b6", HIGH);
+                        outputPort("b7", HIGH);
+                        outputPort("b8", HIGH);
+                        outputPort("b9", HIGH);
+                        outputPort("b10", HIGH);
+                        outputPort("b11", HIGH);
+                        outputPort("b12", LOW);
+                        break;
+                    case 11:
+                        outputPort("b2", HIGH);
+                        outputPort("b3", HIGH);
+                        outputPort("b4", HIGH);
+                        outputPort("b5", HIGH);
+                        outputPort("b6", HIGH);
+                        outputPort("b7", HIGH);
+                        outputPort("b8", HIGH);
+                        outputPort("b9", HIGH);
+                        outputPort("b10", HIGH);
+                        outputPort("b11", HIGH);
+                        outputPort("b12", HIGH);
+                        break;
+                    }
+                }
+            }
+            else if(compareOSCAddress("/pad/led/set"))
+            {
+                BYTE x = getIntArgumentAtIndex(0);
+                BYTE y = getIntArgumentAtIndex(1);
+                BYTE state = getIntArgumentAtIndex(2);
+
+                if(x == 0 && y == 0)
+                    outputPort("g6", (state > 0)?1:0);
+                else if(x == 1 && y == 0)
+                    outputPort("f1", (state > 0)?1:0);
+                else if(x == 0 && y == 1)
+                    outputPort("g8", (state > 0)?1:0);
+                else if(x == 1 && y == 1)
+                    outputPort("f4", (state > 0)?1:0);
+            }
+#endif
+#if defined(USE_LCD)
             else if(compareOSCAddress(msgSetLcdConfig))
             {
                 BYTE mode_num;
@@ -2259,6 +2569,8 @@ void receiveOSCTask(void)
                     return;
                 }
             }
+#endif
+#if defined(USE_LED_PAD) || defined(USE_RGB_PAD)
             else if(compareOSCAddress(msgLatticePadPinSelect))
             {
                 if(getArgumentsLength() < 4)
@@ -2294,6 +2606,8 @@ void receiveOSCTask(void)
                     return;
                 }
             }
+#endif
+#if defined(USE_LED_PAD)
             else if(compareOSCAddress(msgLatticeLedDrvPinSelect))
             {
                 if(getArgumentsLength() < 2)
@@ -2342,6 +2656,8 @@ void receiveOSCTask(void)
                     return;
                 }
             }
+#endif
+#if defined(USE_LED_PAD) || defined(USE_RGB_PAD)
             else if(compareOSCAddress(msgSetLatticePadConnectedNum))
             {
                 if(compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f'))
@@ -2364,6 +2680,8 @@ void receiveOSCTask(void)
             {
                 sendOSCMessage(getOSCPrefix(), msgLatticePadConnectedNum, "i", getNumConnectedLatticePad());
             }
+#endif
+#if defined(USE_LED_PAD)
             else if(compareOSCAddress(msgSetLatticeLed))
             {
                 if(getArgumentsLength() < 4)
@@ -2674,41 +2992,8 @@ void receiveOSCTask(void)
                     return;
                 }
             }
-            else if(compareOSCAddress(msgLatticePadPinSelect))
-            {
-                if(getArgumentsLength() < 4)
-                {
-                    sendOSCMessage(sysPrefix, msgError, "ss", msgLatticePadPinSelect, ": too_few_arguments");
-                    return;
-                }
-                if((compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f')) && compareTypeTagAtIndex(1, 's') && compareTypeTagAtIndex(2, 's') && compareTypeTagAtIndex(3, 's'))
-                {
-                    BYTE index = getIntArgumentAtIndex(0);
-                    char* name_clk = getStringArgumentAtIndex(1);
-                    char* name_shld = getStringArgumentAtIndex(2);
-                    char* name_qh = getStringArgumentAtIndex(3);
-
-                    if(strlen(name_clk) > 3 || strlen(name_shld) > 3 || strlen(name_qh) > 3)
-                    {
-                        sendOSCMessage(sysPrefix, msgError, "ss", msgLatticePadPinSelect, ": too_long_string_length");
-                        return;
-                    }
-
-                    setLatticePadPortClkName(index, name_clk);
-                    setPortIOType(getLatticePadPortClkName(index), IO_OUT);
-                    setLatticePadPortShLdName(index, name_shld);
-                    setPortIOType(getLatticePadPortShLdName(index), IO_OUT);
-                    setLatticePadPortQhName(index, name_qh);
-                    setPortIOType(getLatticePadPortQhName(index), IO_IN);
-
-                    setInitPadFlag(TRUE);
-                }
-                else
-                {
-                    sendOSCMessage(sysPrefix, msgError, "ss", msgLatticePadPinSelect, ": wrong_argument_type");
-                    return;
-                }
-            }
+#endif
+#if defined(USE_RGB_PAD)
             else if(compareOSCAddress(msgLatticeRgbDrvPinSelect))
             {
                 if(getArgumentsLength() < 2)
@@ -2822,9 +3107,9 @@ void receiveOSCTask(void)
                 {
                     BYTE index = getIntArgumentAtIndex(0);
 
-                    if(index > 3)
+                    if(index > 4)
                     {
-                        sendOSCMessage(sysPrefix, msgError, "ss", msgLatticeRgbDrvPinSelect, ": too_long_string_length");
+                        sendOSCMessage(sysPrefix, msgError, "ss", msgGetLatticeRgbSize, ": too_long_string_length");
                         return;
                     }
 
@@ -3162,6 +3447,8 @@ void receiveOSCTask(void)
                     return;
                 }
             }
+#endif
+#if defined(USE_INC_ENC)
             else if(compareOSCAddress(msgRotaryIncEncPinSelect))
             {
                 if(getArgumentsLength() < 4)
@@ -3197,6 +3484,8 @@ void receiveOSCTask(void)
                     return;
                 }
             }
+#endif
+#if defined(USE_ABS_ENC)
             else if(compareOSCAddress(msgRotaryAbsEncPinSelect))
             {
                 if(getArgumentsLength() < 3)
@@ -3231,6 +3520,8 @@ void receiveOSCTask(void)
                     return;
                 }
             }
+#endif
+#if defined(USE_INC_ENC) || defined(USE_ABS_ENC)
             else if(compareOSCAddress(msgRotaryLedDrvPinSelect))
             {
                 if(getArgumentsLength() < 2)
@@ -3279,6 +3570,8 @@ void receiveOSCTask(void)
                     return;
                 }
             }
+#endif
+#if defined(USE_ABS_ENC)
             else if(compareOSCAddress(msgSetRotaryAbsEncConnectedNum))
             {
                 if(compareTypeTagAtIndex(0, 'i') || compareTypeTagAtIndex(0, 'f'))
@@ -3301,6 +3594,8 @@ void receiveOSCTask(void)
             {
                 sendOSCMessage(getOSCPrefix(), msgRotaryAbsEncConnectedNum, "i", getNumConnectedAbsEnc());
             }
+#endif
+#if defined(USE_INC_ENC) || defined(USE_ABS_ENC)
             else if(compareOSCAddress(msgSetRotaryLedStep))
             {
                 BYTE index;
@@ -3602,6 +3897,7 @@ void receiveOSCTask(void)
                     return;
                 }
             }
+#endif
         }
         else if(compareOSCPrefix(toscPrefix))
         {
@@ -3611,10 +3907,10 @@ void receiveOSCTask(void)
                 switch(getIntArgumentAtIndex(0))
                 {
                     case 0:
-                        LED_1_Off();
+                        turnOffLED1();
                         break;
                     case 1:
-                        LED_1_On();
+                        turnOnLED1();
                         break;
                 }
             }
@@ -3623,10 +3919,10 @@ void receiveOSCTask(void)
                 switch(getIntArgumentAtIndex(0))
                 {
                     case 0:
-                        LED_2_Off();
+                        turnOffLED2();
                         break;
                     case 1:
-                        LED_2_On();
+                        turnOnLED2();
                         break;
                 }
             }
@@ -3635,21 +3931,21 @@ void receiveOSCTask(void)
                 if(getIntArgumentAtIndex(0))
                 {
                     LONG w = (LONG)(((float)duty[index] / 100.0) * (float)width);
-                    if(!onTimer23)
+                    if(!onTimer2)
                     {
-                        OpenTimer23(T23_ON | T23_SOURCE_INT | T23_PS_1_1, width);
-                        onTimer23 = TRUE;
+                        OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, width);
+                        onTimer2 = TRUE;
                     }
-                    OpenOC1(OC_ON | OC_TIMER_MODE32 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
+                    OpenOC1(OC_ON | OC_TIMER_MODE16 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
                     onSquare[0] = TRUE;
                 }
                 else
                 {
                     onSquare[0] = FALSE;
-                    if(onTimer23 && (!onSquare[0] && !onSquare[1] && !onSquare[2] && !onSquare[3]))
+                    if(onTimer2 && (!onSquare[0] && !onSquare[1] && !onSquare[2] && !onSquare[3]))
                     {
-                        CloseTimer23();
-                        onTimer23 = FALSE;
+                        CloseTimer2();
+                        onTimer2 = FALSE;
                     }
                     CloseOC1();
                 }
@@ -3659,21 +3955,21 @@ void receiveOSCTask(void)
                 if(getIntArgumentAtIndex(0))
                 {
                     LONG w = (LONG)(((float)duty[index] / 100.0) * (float)width);
-                    if(!onTimer23)
+                    if(!onTimer2)
                     {
-                        OpenTimer23(T23_ON | T23_SOURCE_INT | T23_PS_1_1, width);
-                        onTimer23 = TRUE;
+                        OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, width);
+                        onTimer2 = TRUE;
                     }
-                    OpenOC3(OC_ON | OC_TIMER_MODE32 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
+                    OpenOC3(OC_ON | OC_TIMER_MODE16 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
                     onSquare[1] = TRUE;
                 }
                 else
                 {
                     onSquare[1] = FALSE;
-                    if(onTimer23 && (!onSquare[0] && !onSquare[1] && !onSquare[2] && !onSquare[3]))
+                    if(onTimer2 && (!onSquare[0] && !onSquare[1] && !onSquare[2] && !onSquare[3]))
                     {
-                        CloseTimer23();
-                        onTimer23 = FALSE;
+                        CloseTimer2();
+                        onTimer2 = FALSE;
                     }
                     CloseOC3();
                 }
@@ -3683,21 +3979,21 @@ void receiveOSCTask(void)
                 if(getIntArgumentAtIndex(0))
                 {
                     LONG w = (LONG)(((float)duty[index] / 100.0) * (float)width);
-                    if(!onTimer23)
+                    if(!onTimer2)
                     {
-                        OpenTimer23(T23_ON | T23_SOURCE_INT | T23_PS_1_1, width);
-                        onTimer23 = TRUE;
+                        OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, width);
+                        onTimer2 = TRUE;
                     }
-                    OpenOC4(OC_ON | OC_TIMER_MODE32 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
+                    OpenOC4(OC_ON | OC_TIMER_MODE16 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
                     onSquare[2] = TRUE;
                 }
                 else
                 {
                     onSquare[2] = FALSE;
-                    if(onTimer23 && (!onSquare[0] && !onSquare[1] && !onSquare[2] && !onSquare[3]))
+                    if(onTimer2 && (!onSquare[0] && !onSquare[1] && !onSquare[2] && !onSquare[3]))
                     {
-                        CloseTimer23();
-                        onTimer23 = FALSE;
+                        CloseTimer2();
+                        onTimer2 = FALSE;
                     }
                     CloseOC4();
                 }
@@ -3707,21 +4003,21 @@ void receiveOSCTask(void)
                 if(getIntArgumentAtIndex(0))
                 {
                     LONG w = (LONG)(((float)duty[index] / 100.0) * (float)width);
-                    if(!onTimer23)
+                    if(!onTimer2)
                     {
-                        OpenTimer23(T23_ON | T23_SOURCE_INT | T23_PS_1_1, width);
-                        onTimer23 = TRUE;
+                        OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, width);
+                        onTimer2 = TRUE;
                     }
-                    OpenOC5(OC_ON | OC_TIMER_MODE32 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
+                    OpenOC5(OC_ON | OC_TIMER_MODE16 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
                     onSquare[3] = TRUE;
                 }
                 else
                 {
                     onSquare[3] = FALSE;
-                    if(onTimer23 && (!onSquare[0] && !onSquare[1] && !onSquare[2] && !onSquare[3]))
+                    if(onTimer2 && (!onSquare[0] && !onSquare[1] && !onSquare[2] && !onSquare[3]))
                     {
-                        CloseTimer23();
-                        onTimer23 = FALSE;
+                        CloseTimer2();
+                        onTimer2 = FALSE;
                     }
                     CloseOC5();
                 }
@@ -3740,17 +4036,26 @@ void receiveOSCTask(void)
                 {
                     freq = 20;
                 }
-                else if(freq > 44100)
+                else if(freq > 20000)
                 {
-                    freq = 44100;
+                    freq = 20000;
                 }
                 T2CONbits.TON = 0;
                 TMR2 = 0;
                 OC1CONbits.OCM = 0b000;
+                OC3CONbits.OCM = 0b000;
+                OC4CONbits.OCM = 0b000;
+                OC5CONbits.OCM = 0b000;
                 width = GetSystemClock() / freq;
                 PR2 = width;
                 OC1RS = width / 2;
+                OC3RS = width / 2;
+                OC4RS = width / 2;
+                OC5RS = width / 2;
                 OC1CONbits.OCM = 0b110;
+                OC3CONbits.OCM = 0b110;
+                OC4CONbits.OCM = 0b110;
+                OC5CONbits.OCM = 0b110;
                 T2CONbits.TON = 1;
             }
             else if(compareOSCAddress(msgSetPwmDuty1))
@@ -3971,6 +4276,7 @@ void receiveOSCTask(void)
             }
         }
         // MIDI
+#if defined(USB_USE_MIDI)
         else if(compareOSCPrefix(midiPrefix))
         {
             if(compareOSCAddress(msgSetNote)) // Note On/Off
@@ -4132,6 +4438,7 @@ void receiveOSCTask(void)
                 }
             }
         }
+#endif
         // CDC
 #if defined(USB_USE_CDC)
         else if(compareOSCPrefix(cdcPrefix))
@@ -4158,7 +4465,7 @@ void receiveOSCTask(void)
                 }
 
                 cdcSendFlag = TRUE;
-                APPL_CDC_State = READY_TO_TX_RX;
+                setApplCDCState(READY_TO_TX_RX);
 
                 //_USBHostCDC_TerminateTransfer(USB_SUCCESS);
             }
@@ -4583,7 +4890,7 @@ void receiveOSCTask(void)
 
 /*******************************************************************************
   Function:
-    void __ISR(_TIMER_4_VECTOR, ipl6) ledHandle(void)
+    void __ISR(_TIMER_4_VECTOR, IPL5) ledHandle(void)
 
   Precondition:
 
@@ -4603,41 +4910,44 @@ void receiveOSCTask(void)
   Remarks:
     None
 *******************************************************************************/
-void __ISR(_TIMER_4_VECTOR, ipl6) ledHandle(void)
+void __ISR(_TIMER_4_VECTOR, IPL5) ledHandle(void)
 {
     static BYTE led_state = 0;
     
     switch(led_state)
     {
-        case 0:
-            if(getInitLedDrvFlag())
-                annularLedHandle();
-            
-            led_state = 1;
-            break;
-        case 1:
-            if(getInitLatticeLedDrvFlag())
-                latticeLedHandle();
-            
-            led_state = 2;
-            break;
-        case 2:
-            if(getInitLatticeRgbDrvFlag())
-                latticeRgbHandle();
-
-            led_state = 0;
-            break;
-        default:
-            led_state = 0;
-            break;
+    case 0:
+#if defined(USE_INC_ENC) || defined(USE_ABS_ENC)
+        if(getInitLedDrvFlag())
+            annularLedHandle();
+#endif
+        led_state = 1;
+        break;
+    case 1:
+#if defined(USE_LED_PAD)
+        if(getInitLatticeLedDrvFlag())
+            latticeLedHandle();
+#endif
+        led_state = 2;
+        break;
+    case 2:
+#if defined(USE_RGB_PAD)
+        if(getInitLatticeRgbDrvFlag())
+            latticeRgbHandle();
+#endif
+        led_state = 0;
+        break;
+    default:
+        led_state = 0;
+        break;
     }
-
+    
     mT4ClearIntFlag();
 }
 
 /*******************************************************************************
   Function:
-    void __ISR(_TIMER_5_VECTOR, IPL5) sendOSCTask(void)
+    void __ISR(_TIMER_5_VECTOR, IPL4) sendOSCTask(void)
 
   Precondition:
 
@@ -4657,10 +4967,10 @@ void __ISR(_TIMER_4_VECTOR, ipl6) ledHandle(void)
   Remarks:
     None
 *******************************************************************************/
-void __ISR(_TIMER_5_VECTOR, IPL5) sendOSCTask(void)
+void __ISR(_TIMER_5_VECTOR, IPL4) sendOSCTask(void)
 {
     int i, j;
-
+    
     if(!getInitSendFlag())
     {
         setInitSendFlag(openOSCSendPort(getRemoteIp(), getRemotePort()));
@@ -4675,67 +4985,114 @@ void __ISR(_TIMER_5_VECTOR, IPL5) sendOSCTask(void)
     {
         switch(sendOSCTaskIndex)
         {
-            case 0:
-                swState1 = SW_State();
-                if(swState1 != swState0)
+        case 0:
+            swState1 = getSW1State();
+            if(swState1 != swState0)
+            {
+                if(swState1)
+                    sendOSCMessage(getOSCPrefix(), msgOnboardSw1, "s", "off");
+                else
+                    sendOSCMessage(getOSCPrefix(), msgOnboardSw1, "s", "on");
+            }
+            swState0 = swState1;
+            
+            sendOSCTaskIndex = 1;
+            break;
+        case 1:
+            j = 0;
+            for(i = 0; i < AN_NUM; i++)
+            {
+                if(getAnalogEnable(i))
                 {
-                    if(swState1)
-                        sendOSCMessage(getOSCPrefix(), msgOnboardSw1, "s", "off");
-                    else
-                        sendOSCMessage(getOSCPrefix(), msgOnboardSw1, "s", "on");
+                    analogInHandle(i, (LONG)ReadADC10(j));
+                    j++;
                 }
-                swState0 = swState1;
-
-                sendOSCTaskIndex = 1;
-                break;
-            case 1:
-                j = 0;
-                for(i = 0; i < AN_NUM; i++)
-                {
-                    if(getAnalogEnable(i))
-                    {
-                        analogInHandle(i, (LONG)ReadADC10(j));
-                        j++;
-                    }
-                }
-                sendAdc();
-
-                sendOSCTaskIndex = 2;
-                break;
-            case 2:
-                //for(i = 0; i < getNumConnectedAbsEnc(); i++)
-                //{
-                //    incEncoderHandle(i);
-                //}
-                sendPad16();
-
-                sendOSCTaskIndex = 3;
-                break;
-            case 3:
-                for(i = 0; i < getNumConnectedAbsEnc(); i++)
-                {
-                    incEncoderHandle(i);
-                    sendEncInc32(i);
-                }
-                
-                sendOSCTaskIndex = 4;
-                break;
-            case 4:
-                absEncoderHandle();
-                for(i = 0; i < getNumConnectedAbsEnc(); i++)
-                {
-                    sendEncAbs32(i);
-                }
-                
-                sendOSCTaskIndex = 0;
-                break;
-            default:
-                sendOSCTaskIndex = 0;
-                break;
+            }
+            sendAdc();
+            
+            sendOSCTaskIndex = 2;
+            break;
+        case 2:
+#if defined(USE_PITCH)
+            sendPad4();
+#endif
+#if defined(USE_LED_PAD) || defined(USE_RGB_PAD)
+            sendPad16();
+#endif
+            sendOSCTaskIndex = 3;
+            break;
+        case 3:
+#if defined(USE_INC_ENC)
+            for(i = 0; i < getNumConnectedAbsEnc(); i++)
+            {
+                incEncoderHandle(i);
+                sendEncInc32(i);
+            }
+#endif                
+            sendOSCTaskIndex = 4;
+            break;
+        case 4:
+#if defined(USE_ABS_ENC)
+            absEncoderHandle();
+            for(i = 0; i < getNumConnectedAbsEnc(); i++)
+            {
+                sendEncAbs32(i);
+            }
+#endif                
+            sendOSCTaskIndex = 0;
+            break;
+        default:
+            sendOSCTaskIndex = 0;
+            break;
         }
     }
     mT5ClearIntFlag();
 }
+
+#if 1
+#if defined(USE_RN131)
+void __ISR(_UART_2_VECTOR, IPL6) receiveOSCFromRN134(void)
+{
+    BYTE count = 0;
+    BYTE dammy = 0;
+
+    IFS1bits.U2RXIF = 0;
+
+    if(U2STAbits.OERR || U2STAbits.FERR || U2STAbits.PERR)
+    {
+        dammy = U2RXREG;
+        U2STA &= 0xFFF0;
+        //U2STAbits.OERR = 0;
+        //U2STAbits.FERR = 0;
+        //U2STAbits.PERR = 0;
+        U2MODE = 0;
+        Delay10us(50);
+        U2MODE = 0x8200;
+    }
+    else
+    {
+        while(U2STAbits.URXDA && count < 192)
+        {
+            setOSCPacketFromRN134(count++, U2RXREG);
+            Delay10us(10);
+        }
+
+        incRingBufIndex();
+        
+        if(U2STAbits.OERR || U2STAbits.FERR || U2STAbits.PERR)
+        {
+            U2STA &= 0xFFF0;
+            //U2STAbits.OERR = 0;
+            //U2STAbits.FERR = 0;
+            //U2STAbits.PERR = 0;
+            U2MODE = 0;
+            Delay10us(50);
+            U2MODE = 0x8200;
+        }
+    }
+}
+#endif
+#endif
 
 /*******************************************************************************
   Function:
@@ -4794,28 +5151,27 @@ void HIDControlTask(void)
     BYTE u8Data[128] = {0};
 
     // User Application USB tasks
-    if(USBDeviceState < CONFIGURED_STATE || USBSuspendControl == 1)
+    if(!checkUSBState())
         return;
 
-    if(!USBHandleBusy(HIDRxHandle))
+    if(!hidHandleBusy())
     {
-        HIDRxHandle = USBRxOnePacket(HID_EP, (BYTE*)&ReceivedHidDataBuffer[0], 64);
-        MIDIRxHandle = USBRxOnePacket(MIDI_EP, (BYTE*)&ReceivedHidDataBuffer[0], 64);
-        if(ReceivedHidDataBuffer[0] == 0x80)
+        hidRxOnePacket();
+        if(getRcvHidDataBuffer(0) == 0x80)
         {
             //LED_1_Toggle();
         }
-        switch(ReceivedHidDataBuffer[0])
+        switch(getRcvHidDataBuffer(0))
         {
             case 0x80:// ADC Enable
-                if(ReceivedHidDataBuffer[1])
+                if(getRcvHidDataBuffer(1))
                 {
                     AD1CON1bits.ON = 0;
 
                     int i;
                     WORD anum = 0;
-                    WORD id = ReceivedHidDataBuffer[2];
-                    BYTE state = ReceivedHidDataBuffer[3];
+                    WORD id = getRcvHidDataBuffer(2);
+                    BYTE state = getRcvHidDataBuffer(3);
 
                     if(id > 13 || state > 1)
                         return;
@@ -4864,113 +5220,107 @@ void HIDControlTask(void)
                 }
                 else
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
+                    BYTE id = getRcvHidDataBuffer(2);
 
                     if(id > 13)
                         return;
 
-                    ToSendHidDataBuffer[0] = 0x80;
-                    ToSendHidDataBuffer[1] = 3;
-                    ToSendHidDataBuffer[2] = ReceivedHidDataBuffer[2];
-                    ToSendHidDataBuffer[3] = getAnalogEnable(ReceivedHidDataBuffer[2]);
-                    ToSendHidDataBuffer[4] = getAnalogByte(ReceivedHidDataBuffer[2], BYTE_ORIGINAL);
-                    ToSendHidDataBuffer[5] = 0x00;
+                    setSndHidDataBuffer(0, 0x80);
+                    setSndHidDataBuffer(1,3);
+                    setSndHidDataBuffer(2, getRcvHidDataBuffer(2));
+                    setSndHidDataBuffer(3, getAnalogEnable(getRcvHidDataBuffer(2)));
+                    setSndHidDataBuffer(4, getAnalogByte(getRcvHidDataBuffer(2), BYTE_ORIGINAL));
+                    setSndHidDataBuffer(5, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0x81:
-                if(ReceivedHidDataBuffer[1])
+                if(getRcvHidDataBuffer(1))
                 {
-                    if(ReceivedHidDataBuffer[3] == 0)
+                    if(getRcvHidDataBuffer(3) == 0)
                     {
-                        setAnPortDioType(ReceivedHidDataBuffer[2], IO_IN);
+                        setAnPortDioType(getRcvHidDataBuffer(2), IO_IN);
                     }
-                    else if(ReceivedHidDataBuffer[3] == 1)
+                    else if(getRcvHidDataBuffer(3) == 1)
                     {
-                        setAnPortDioType(ReceivedHidDataBuffer[2], IO_OUT);
+                        setAnPortDioType(getRcvHidDataBuffer(2), IO_OUT);
                     }
                 }
                 else
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
+                    BYTE id = getRcvHidDataBuffer(2);
 
                     if(id > 13)
                         return;
 
-                    ToSendHidDataBuffer[0] = 0x81;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = ReceivedHidDataBuffer[2];
-                    ToSendHidDataBuffer[3] = ioAnPort[ReceivedHidDataBuffer[2]];
-                    ToSendHidDataBuffer[5] = 0x00;
+                    setSndHidDataBuffer(0, 0x81);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, getRcvHidDataBuffer(2));
+                    setSndHidDataBuffer(3, ioAnPort[getRcvHidDataBuffer(2)]);
+                    setSndHidDataBuffer(5, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0x82:
-                if(ReceivedHidDataBuffer[1] == 1)
+                if(getRcvHidDataBuffer(1) == 1)
                 {
-                    outputAnPort(ReceivedHidDataBuffer[2], ReceivedHidDataBuffer[3]);
+                    outputAnPort(getRcvHidDataBuffer(2), getRcvHidDataBuffer(3));
                 }
-                else if(ReceivedHidDataBuffer[1] == 0)
+                else if(getRcvHidDataBuffer(1) == 0)
                 {
-                    ToSendHidDataBuffer[0] = 0x82;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = ReceivedHidDataBuffer[2];
-                    ToSendHidDataBuffer[3] = inputAnPort(ReceivedHidDataBuffer[2]);
-                    ToSendHidDataBuffer[4] = 0x00;
+                    setSndHidDataBuffer(0, 0x82);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, getRcvHidDataBuffer(2));
+                    setSndHidDataBuffer(3, inputAnPort(getRcvHidDataBuffer(2)));
+                    setSndHidDataBuffer(4, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0x83:
-                if(ReceivedHidDataBuffer[1] == 1)
+                if(getRcvHidDataBuffer(1) == 1)
                 {
-                    BYTE index = ReceivedHidDataBuffer[2];
+                    BYTE index = getRcvHidDataBuffer(2);
                     if(index > 4)
                         return;
 
-                    if(ReceivedHidDataBuffer[3] == 1)
+                    if(getRcvHidDataBuffer(3) == 1)
                     {
                         LONG w = (LONG)(((float)duty[index] / 100.0) * (float)width);
-                        if(!onTimer23)
+                        if(!onTimer2)
                         {
-                            OpenTimer23(T23_ON | T23_SOURCE_INT | T23_PS_1_1, width);
-                            onTimer23 = TRUE;
+                            OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, width);
+                            onTimer2 = TRUE;
                         }
                         switch(index)
                         {
                             case 0:
-                                OpenOC1(OC_ON | OC_TIMER_MODE32 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
+                                OpenOC1(OC_ON | OC_TIMER_MODE16 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
                                 break;
                             case 1:
-                                OpenOC3(OC_ON | OC_TIMER_MODE32 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
+                                OpenOC3(OC_ON | OC_TIMER_MODE16 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
                                 break;
                             case 2:
-                                OpenOC4(OC_ON | OC_TIMER_MODE32 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
+                                OpenOC4(OC_ON | OC_TIMER_MODE16 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
                                 break;
                             case 3:
-                                OpenOC5(OC_ON | OC_TIMER_MODE32 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
+                                OpenOC5(OC_ON | OC_TIMER_MODE16 | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, width / 2, w);
                                 break;
                         }
                         onSquare[index] = TRUE;
                     }
-                    else if(ReceivedHidDataBuffer[3] == 0)
+                    else if(getRcvHidDataBuffer(3) == 0)
                     {
                         onSquare[index] = FALSE;
-                        if(onTimer23 && (!onSquare[0] && !onSquare[1] && !onSquare[2] && !onSquare[3]))
+                        if(onTimer2 && (!onSquare[0] && !onSquare[1] && !onSquare[2] && !onSquare[3]))
                         {
-                            CloseTimer23();
-                            onTimer23 = FALSE;
+                            CloseTimer2();
+                            onTimer2 = FALSE;
                         }
                         switch(index)
                         {
@@ -4989,33 +5339,31 @@ void HIDControlTask(void)
                         }
                     }
                 }
-                else if(ReceivedHidDataBuffer[1] == 0)
+                else if(getRcvHidDataBuffer(1) == 0)
                 {
-                    BYTE index = ReceivedHidDataBuffer[2];
-                    
-                    ToSendHidDataBuffer[0] = 0x83;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = index;
-                    ToSendHidDataBuffer[3] = onSquare[index];
-                    ToSendHidDataBuffer[4] = 0x00;
+                    BYTE index = getRcvHidDataBuffer(2);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    setSndHidDataBuffer(0, 0x83);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, index);
+                    setSndHidDataBuffer(3, onSquare[index]);
+                    setSndHidDataBuffer(4, 0x00);
+
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0x84:
-                if(ReceivedHidDataBuffer[1] == 1)
+                if(getRcvHidDataBuffer(1) == 1)
                 {
-                    freq = (ReceivedHidDataBuffer[2] << 8) | ReceivedHidDataBuffer[3];
+                    freq = (getRcvHidDataBuffer(2) << 8) | getRcvHidDataBuffer(3);
                     if(freq < 20)
                     {
                         freq = 20;
                     }
-                    else if(freq > 44100)
+                    else if(freq > 20000)
                     {
-                        freq = 44100;
+                        freq = 20000;
                     }
                     T2CONbits.TON = 0;
                     TMR2 = 0;
@@ -5026,25 +5374,23 @@ void HIDControlTask(void)
                     OC1CONbits.OCM = 0b110;
                     T2CONbits.TON = 1;
                 }
-                else if(ReceivedHidDataBuffer[1] == 0)
+                else if(getRcvHidDataBuffer(1) == 0)
                 {
-                    ToSendHidDataBuffer[0] = 0x84;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = (BYTE)(freq >> 8);
-                    ToSendHidDataBuffer[3] = (BYTE)freq;
-                    ToSendHidDataBuffer[4] = 0x00;
+                    setSndHidDataBuffer(0, 0x84);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, (BYTE)(freq >> 8));
+                    setSndHidDataBuffer(3, (BYTE)freq);
+                    setSndHidDataBuffer(4, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0x85:
-                if(ReceivedHidDataBuffer[1] == 1)
+                if(getRcvHidDataBuffer(1) == 1)
                 {
-                    BYTE index = ReceivedHidDataBuffer[2];
-                    duty[index] = ReceivedHidDataBuffer[3];
+                    BYTE index = getRcvHidDataBuffer(2);
+                    duty[index] = getRcvHidDataBuffer(3);
                     if(duty[index] < 0)
                     {
                         duty[index] = 0;
@@ -5080,27 +5426,25 @@ void HIDControlTask(void)
                     }
                     T2CONbits.TON = 1;
                 }
-                else if(ReceivedHidDataBuffer[1] == 0)
+                else if(getRcvHidDataBuffer(1) == 0)
                 {
-                    BYTE index = ReceivedHidDataBuffer[2];
+                    BYTE index = getRcvHidDataBuffer(2);
 
-                    ToSendHidDataBuffer[0] = 0x85;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = index;
-                    ToSendHidDataBuffer[3] = duty[index];
-                    ToSendHidDataBuffer[4] = 0x00;
-                    
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    setSndHidDataBuffer(0, 0x85);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, index);
+                    setSndHidDataBuffer(3, duty[index]);
+                    setSndHidDataBuffer(4, 0x00);
+
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0x86:
-                if(ReceivedHidDataBuffer[1] == 1)
+                if(getRcvHidDataBuffer(1) == 1)
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
-                    BYTE type = ReceivedHidDataBuffer[3];
+                    BYTE id = getRcvHidDataBuffer(2);
+                    BYTE type = getRcvHidDataBuffer(3);
 
                     if(type == 0)
                     {
@@ -5113,52 +5457,48 @@ void HIDControlTask(void)
                 }
                 else
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
+                    BYTE id = getRcvHidDataBuffer(2);
 
                     if(id > 3)
                         return;
 
-                    ToSendHidDataBuffer[0] = 0x86;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = ReceivedHidDataBuffer[2];
-                    ToSendHidDataBuffer[3] = ioPwmPort[ReceivedHidDataBuffer[2]];
-                    ToSendHidDataBuffer[5] = 0x00;
+                    setSndHidDataBuffer(0, 0x86);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, getRcvHidDataBuffer(2));
+                    setSndHidDataBuffer(3, ioPwmPort[getRcvHidDataBuffer(2)]);
+                    setSndHidDataBuffer(5, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0x87:
-                if(ReceivedHidDataBuffer[1] == 1)
+                if(getRcvHidDataBuffer(1) == 1)
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
-                    BYTE state = ReceivedHidDataBuffer[3];
+                    BYTE id = getRcvHidDataBuffer(2);
+                    BYTE state = getRcvHidDataBuffer(3);
                     outputPwmPort(id, state);
                 }
-                else if(ReceivedHidDataBuffer[1] == 0)
+                else if(getRcvHidDataBuffer(1) == 0)
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
+                    BYTE id = getRcvHidDataBuffer(2);
                     BYTE state = inputPwmPort(id);
 
-                    ToSendHidDataBuffer[0] = 0x87;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = id;
-                    ToSendHidDataBuffer[3] = state;
-                    ToSendHidDataBuffer[4] = 0x00;
+                    setSndHidDataBuffer(0, 0x87);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, id);
+                    setSndHidDataBuffer(3, state);
+                    setSndHidDataBuffer(4, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0x88:
-                if(ReceivedHidDataBuffer[1] == 1)
+                if(getRcvHidDataBuffer(1) == 1)
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
-                    BYTE type = ReceivedHidDataBuffer[3];
+                    BYTE id = getRcvHidDataBuffer(2);
+                    BYTE type = getRcvHidDataBuffer(3);
 
                     if(type == 0)
                     {
@@ -5171,52 +5511,48 @@ void HIDControlTask(void)
                 }
                 else
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
+                    BYTE id = getRcvHidDataBuffer(2);
 
                     if(id > 3)
                         return;
 
-                    ToSendHidDataBuffer[0] = 0x88;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = ReceivedHidDataBuffer[2];
-                    ToSendHidDataBuffer[3] = ioDPort[ReceivedHidDataBuffer[2]];
-                    ToSendHidDataBuffer[5] = 0x00;
+                    setSndHidDataBuffer(0, 0x88);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, getRcvHidDataBuffer(2));
+                    setSndHidDataBuffer(3, ioDPort[getRcvHidDataBuffer(2)]);
+                    setSndHidDataBuffer(5, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0x89:
-                if(ReceivedHidDataBuffer[1] == 1)
+                if(getRcvHidDataBuffer(1) == 1)
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
-                    BYTE state = ReceivedHidDataBuffer[3];
+                    BYTE id = getRcvHidDataBuffer(2);
+                    BYTE state = getRcvHidDataBuffer(3);
                     outputDigitalPort(id, state);
                 }
-                else if(ReceivedHidDataBuffer[1] == 0)
+                else if(getRcvHidDataBuffer(1) == 0)
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
+                    BYTE id = getRcvHidDataBuffer(2);
                     BYTE state = inputDigitalPort(id);
 
-                    ToSendHidDataBuffer[0] = 0x89;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = id;
-                    ToSendHidDataBuffer[3] = state;
-                    ToSendHidDataBuffer[4] = 0x00;
+                    setSndHidDataBuffer(0, 0x89);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, id);
+                    setSndHidDataBuffer(3, state);
+                    setSndHidDataBuffer(4, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0x8A:
-                if(ReceivedHidDataBuffer[1] == 1)
+                if(getRcvHidDataBuffer(1) == 1)
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
-                    BYTE type = ReceivedHidDataBuffer[3];
+                    BYTE id = getRcvHidDataBuffer(2);
+                    BYTE type = getRcvHidDataBuffer(3);
 
                     switch(id)
                     {
@@ -5260,28 +5596,26 @@ void HIDControlTask(void)
                 }
                 else
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
+                    BYTE id = getRcvHidDataBuffer(2);
 
                     if(id > 5)
                         return;
 
-                    ToSendHidDataBuffer[0] = 0x8A;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = ReceivedHidDataBuffer[2];
-                    ToSendHidDataBuffer[3] = ioSpiPort[ReceivedHidDataBuffer[2]];
-                    ToSendHidDataBuffer[5] = 0x00;
+                    setSndHidDataBuffer(0, 0x8A);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, getRcvHidDataBuffer(2));
+                    setSndHidDataBuffer(3, ioSpiPort[getRcvHidDataBuffer(2)]);
+                    setSndHidDataBuffer(5, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0x8B:
-                if(ReceivedHidDataBuffer[1] == 1)
+                if(getRcvHidDataBuffer(1) == 1)
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
-                    BYTE state = ReceivedHidDataBuffer[3];
+                    BYTE id = getRcvHidDataBuffer(2);
+                    BYTE state = getRcvHidDataBuffer(3);
                     switch(id)
                     {
                         case 0:
@@ -5304,9 +5638,9 @@ void HIDControlTask(void)
                             break;
                     }
                 }
-                else if(ReceivedHidDataBuffer[1] == 0)
+                else if(getRcvHidDataBuffer(1) == 0)
                 {
-                    BYTE id = ReceivedHidDataBuffer[2];
+                    BYTE id = getRcvHidDataBuffer(2);
                     BYTE state = 0;
                     switch(id)
                     {
@@ -5330,132 +5664,121 @@ void HIDControlTask(void)
                             break;
                     }
 
-                    ToSendHidDataBuffer[0] = 0x8B;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = id;
-                    ToSendHidDataBuffer[3] = state;
-                    ToSendHidDataBuffer[4] = 0x00;
+                    setSndHidDataBuffer(0, 0x8B);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, id);
+                    setSndHidDataBuffer(3, state);
+                    setSndHidDataBuffer(4, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0xF0:// Host IP
-                if(!ReceivedHidDataBuffer[1])
+                if(!getRcvHidDataBuffer(1))
                 {
-                    ToSendHidDataBuffer[0] = 0xF0;
-                    ToSendHidDataBuffer[1] = 4;
-                    ToSendHidDataBuffer[2] = (BYTE)((AppConfig.MyIPAddr.Val >> 0) & 0x000000FF);
-                    ToSendHidDataBuffer[3] = (BYTE)((AppConfig.MyIPAddr.Val >> 8) & 0x000000FF);
-                    ToSendHidDataBuffer[4] = (BYTE)((AppConfig.MyIPAddr.Val >> 16) & 0x000000FF);
-                    ToSendHidDataBuffer[5] = (BYTE)((AppConfig.MyIPAddr.Val >> 24) & 0x000000FF);
-                    ToSendHidDataBuffer[6] = 0x00;
+                    setSndHidDataBuffer(0, 0xF0);
+                    setSndHidDataBuffer(1, 4);
+                    setSndHidDataBuffer(2, (BYTE)((AppConfig.MyIPAddr.Val >> 0) & 0x000000FF));
+                    setSndHidDataBuffer(3, (BYTE)((AppConfig.MyIPAddr.Val >> 8) & 0x000000FF));
+                    setSndHidDataBuffer(4, (BYTE)((AppConfig.MyIPAddr.Val >> 16) & 0x000000FF));
+                    setSndHidDataBuffer(5, (BYTE)((AppConfig.MyIPAddr.Val >> 24) & 0x000000FF));
+                    setSndHidDataBuffer(6, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0xF1:// Remote IP
-                if(!ReceivedHidDataBuffer[1])
+                if(!getRcvHidDataBuffer(1))
                 {
-                    ToSendHidDataBuffer[0] = 0xF1;
-                    ToSendHidDataBuffer[1] = 4;
-                    ToSendHidDataBuffer[2] = getRemoteIpAtIndex(0);
-                    ToSendHidDataBuffer[3] = getRemoteIpAtIndex(1);
-                    ToSendHidDataBuffer[4] = getRemoteIpAtIndex(2);
-                    ToSendHidDataBuffer[5] = getRemoteIpAtIndex(3);
-                    ToSendHidDataBuffer[6] = 0x00;
+                    setSndHidDataBuffer(0, 0xF1);
+                    setSndHidDataBuffer(1, 4);
+                    setSndHidDataBuffer(2, getRemoteIpAtIndex(0));
+                    setSndHidDataBuffer(3, getRemoteIpAtIndex(1));
+                    setSndHidDataBuffer(4, getRemoteIpAtIndex(2));
+                    setSndHidDataBuffer(5, getRemoteIpAtIndex(3));
+                    setSndHidDataBuffer(6, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 else
                 {
-                    setRemoteIpAtIndex(0, ReceivedHidDataBuffer[2]);
-                    setRemoteIpAtIndex(1, ReceivedHidDataBuffer[3]);
-                    setRemoteIpAtIndex(2, ReceivedHidDataBuffer[4]);
-                    setRemoteIpAtIndex(3, ReceivedHidDataBuffer[5]);
+                    setRemoteIpAtIndex(0, getRcvHidDataBuffer(2));
+                    setRemoteIpAtIndex(1, getRcvHidDataBuffer(3));
+                    setRemoteIpAtIndex(2, getRcvHidDataBuffer(4));
+                    setRemoteIpAtIndex(3, getRcvHidDataBuffer(5));
                     setInitSendFlag(FALSE);
                     closeOSCSendPort();
                 }
                 break;
             case 0xF2:// Local Port
-                if(!ReceivedHidDataBuffer[1])
+                if(!getRcvHidDataBuffer(1))
                 {
-                    ToSendHidDataBuffer[0] = 0xF2;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = (BYTE)((getLocalPort() >> 0) & 0x00FF);
-                    ToSendHidDataBuffer[3] = (BYTE)((getLocalPort() >> 8) & 0x00FF);
-                    ToSendHidDataBuffer[4] = 0x00;
+                    setSndHidDataBuffer(0, 0xF2);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, (BYTE)((getLocalPort() >> 0) & 0x00FF));
+                    setSndHidDataBuffer(3, (BYTE)((getLocalPort() >> 8) & 0x00FF));
+                    setSndHidDataBuffer(4, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 else
                 {
-                    setLocalPort(ReceivedHidDataBuffer[2] | (ReceivedHidDataBuffer[3] << 8));
+                    setLocalPort(getRcvHidDataBuffer(2) | (getRcvHidDataBuffer(3) << 8));
                     setInitReceiveFlag(FALSE);
                     closeOSCReceivePort();
                 }
                 break;
             case 0xF3:// Remote Port
-                if(!ReceivedHidDataBuffer[1])
+                if(!getRcvHidDataBuffer(1))
                 {
-                    ToSendHidDataBuffer[0] = 0xF3;
-                    ToSendHidDataBuffer[1] = 2;
-                    ToSendHidDataBuffer[2] = (BYTE)((getRemotePort() >> 0) & 0x00FF);
-                    ToSendHidDataBuffer[3] = (BYTE)((getRemotePort() >> 8) & 0x00FF);
-                    ToSendHidDataBuffer[4] = 0x00;
+                    setSndHidDataBuffer(0, 0xF3);
+                    setSndHidDataBuffer(1, 2);
+                    setSndHidDataBuffer(2, (BYTE)((getRemotePort() >> 0) & 0x00FF));
+                    setSndHidDataBuffer(3, (BYTE)((getRemotePort() >> 8) & 0x00FF));
+                    setSndHidDataBuffer(4, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 else
                 {
-                    setRemotePort(ReceivedHidDataBuffer[2] | (ReceivedHidDataBuffer[3] << 8));
+                    setRemotePort(getRcvHidDataBuffer(2) | (getRcvHidDataBuffer(3) << 8));
                     setInitSendFlag(FALSE);
                     closeOSCSendPort();
                 }
                 break;
             case 0xF4:// Mac Address
-                if(!ReceivedHidDataBuffer[1])
+                if(!getRcvHidDataBuffer(1))
                 {
-                    ToSendHidDataBuffer[0] = 0xF4;
-                    ToSendHidDataBuffer[1] = 6;
-                    ToSendHidDataBuffer[2] = AppConfig.MyMACAddr.v[0];
-                    ToSendHidDataBuffer[3] = AppConfig.MyMACAddr.v[1];
-                    ToSendHidDataBuffer[4] = AppConfig.MyMACAddr.v[2];
-                    ToSendHidDataBuffer[5] = AppConfig.MyMACAddr.v[3];
-                    ToSendHidDataBuffer[6] = AppConfig.MyMACAddr.v[4];
-                    ToSendHidDataBuffer[7] = AppConfig.MyMACAddr.v[5];
-                    ToSendHidDataBuffer[8] = 0x00;
+                    setSndHidDataBuffer(0, 0xF4);
+                    setSndHidDataBuffer(1, 6);
+                    setSndHidDataBuffer(2, AppConfig.MyMACAddr.v[0]);
+                    setSndHidDataBuffer(3, AppConfig.MyMACAddr.v[1]);
+                    setSndHidDataBuffer(4, AppConfig.MyMACAddr.v[2]);
+                    setSndHidDataBuffer(5, AppConfig.MyMACAddr.v[3]);
+                    setSndHidDataBuffer(6, AppConfig.MyMACAddr.v[4]);
+                    setSndHidDataBuffer(7, AppConfig.MyMACAddr.v[5]);
+                    setSndHidDataBuffer(8, 0x00);
 
-                    if(!USBHandleBusy(HIDTxHandle))
-                    {
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
-                    }
+                    if(!hidHandleBusy())
+                        hidTxOnePacket();
                 }
                 break;
             case 0xF5:// Soft Reset
-                if(ReceivedHidDataBuffer[1])
+                if(getRcvHidDataBuffer(1))
                 {
                     NVMErasePage((void*)NVM_DATA);
                     NVMWriteWord((void*)(NVM_DATA), (unsigned int)0x01);
                 }
                 SoftReset();
                 break;
+#if 0//test
             case 0xF6:// Save Current Settings
-                if(ReceivedHidDataBuffer[1])
+                if(getRcvHidDataBuffer(1])
                 {
                     u8Data[0] = getRemoteIpAtIndex(0);
                     u8Data[1] = getRemoteIpAtIndex(1);
@@ -5479,7 +5802,7 @@ void HIDControlTask(void)
                     setLocalPort((WORD)u8Data[4] | ((WORD)u8Data[5] << 8));
                     setRemotePort((WORD)u8Data[6] | ((WORD)u8Data[7] << 8));
 
-                    if(!USBHandleBusy(HIDTxHandle))
+                    if(!hidHandleBusy())
                     {
                         ToSendHidDataBuffer[0] = 0xF6;
                         ToSendHidDataBuffer[1] = getRemoteIpAtIndex(0);
@@ -5492,119 +5815,13 @@ void HIDControlTask(void)
                         ToSendHidDataBuffer[8] = (BYTE)((getRemotePort() >> 8) & 0x00FF);
                         ToSendHidDataBuffer[9] = 0x00;
 
-                        HIDTxHandle = USBTxOnePacket(HID_EP, (BYTE*)ToSendHidDataBuffer, 64);
+                        hidTxOnePacket();
                     }
                 }
                 break;
+#endif//test
             case 0xF7:
                 break;
-        }
-    }
-}
-
-/*******************************************************************************
-  Function:
-    void sendNote(void)
-
-  Precondition:
-
-
-  Summary:
-
-
-  Description:
-
-
-  Parameters:
-    None
-
-  Return Values:
-    None
-
-  Remarks:
-    None
-*******************************************************************************/
-#if 0
-void sendNote(void)
-{
-    int i, j;
-    for(i = 0; i < MAX_BTN_ROW; i++)
-        btnLast[i] = btnCurrent[i];
-
-    for(i = 0; i < MAX_BTN_ROW; i++)
-    {
-        for(j = 0; j < MAX_BTN_COL; j++)
-        {
-            if(buttonCheck(i, j))
-            {
-                midiData.Val = 0;
-                midiData.CableNumber = 0;
-                midiData.CodeIndexNumber = MIDI_CIN_NOTE_ON;
-                midiData.DATA_0 = 0x90;
-                midiData.DATA_1 = i * MAX_BTN_COL + j;
-                midiData.DATA_2 = btnCurrent[i] >> j & 0x01;
-
-                if(!USBHandleBusy(MIDITxHandle))
-                    MIDITxHandle = USBTxOnePacket(MIDI_EP, (BYTE*)&midiData, 4);
-            }
-        }
-    }
-    //delayUs(2);
-}
-#endif
-
-/*******************************************************************************
-  Function:
-    void sendControlChange(void)
-
-  Precondition:
-
-
-  Summary:
-
-
-  Description:
-
-
-  Parameters:
-    None
-
-  Return Values:
-    None
-
-  Remarks:
-    None
-*******************************************************************************/
-void sendControlChange(void)
-{
-    int i;
-    BYTE value;
-
-    for(i = 0; i < AN_NUM; i++)
-    {
-        if(getAnalogEnable(i))
-        {
-            analogInHandle(i, (LONG)ReadADC10(i));
-
-            if(getAnalogFlag(i))
-            {
-                midiData.Val = 0;
-                midiData.CableNumber = 0;
-                midiData.CodeIndexNumber = MIDI_CIN_CONTROL_CHANGE;
-                midiData.DATA_0 = 0xB0;
-
-                value = getAnalogByte(i, BYTE_ORIGINAL);
-                
-                midiData.DATA_1 = i;
-                midiData.DATA_2 = value;
-           
-                if(!USBHandleBusy(MIDITxHandle))
-                {
-                    MIDITxHandle = USBTxOnePacket(MIDI_EP, (BYTE*)&midiData, 4);
-                    resetAnalogFlag(i);
-                }
-                //delayUs(20);
-            }
         }
     }
 }
@@ -5636,35 +5853,35 @@ void receiveMIDIDatas(void)
     int i;
     BYTE ch, num, val;
 
-    if((USBDeviceState < CONFIGURED_STATE) || (USBSuspendControl == 1))
+    if(checkUSBState())
         return;
 
-    if(!USBHandleBusy(MIDIRxHandle))
+    if(!midiHandleBusy())
     {
-        MIDIRxHandle = USBRxOnePacket(MIDI_EP, (BYTE*)&ReceivedMidiDataBuffer, 64);
+        midiRxOnePacket();
 
         //MIDI Note
         i = 1;
-        while((ReceivedMidiDataBuffer[i] & 0xF0) == 0x90)
+        while((getRcvMidiDataBuffer(i) & 0xF0) == 0x90)
         {
-            ch = ReceivedMidiDataBuffer[i] & 0x0F;
-            num = ReceivedMidiDataBuffer[i + 1];
-            val = ReceivedMidiDataBuffer[i + 2];
+            ch = getRcvMidiDataBuffer(i) & 0x0F;
+            num = getRcvMidiDataBuffer(i + 1);
+            val = getRcvMidiDataBuffer(i + 2);
 
-            ReceivedMidiDataBuffer[i] &= 0x00;
+            setRcvMidiDataBuffer(i, getRcvMidiDataBuffer(i) & 0x00);
             i += 4;
             continue;
         }
 
         //MIDI CC
         i = 1;
-        while((ReceivedMidiDataBuffer[i] & 0xF0) == 0xB0)
+        while((getRcvMidiDataBuffer(i) & 0xF0) == 0xB0)
         {
-            ch = ReceivedMidiDataBuffer[i] & 0x0F;
-            num = ReceivedMidiDataBuffer[i + 1];
-            val = ReceivedMidiDataBuffer[i + 2];
+            ch = getRcvMidiDataBuffer(i) & 0x0F;
+            num = getRcvMidiDataBuffer(i + 1);
+            val = getRcvMidiDataBuffer(i + 2);
 
-            ReceivedMidiDataBuffer[i] &= 0x00;
+            setRcvMidiDataBuffer(i, getRcvMidiDataBuffer(i) & 0x00);
             i += 4;
             continue;
         }
@@ -5693,108 +5910,124 @@ void receiveMIDIDatas(void)
   Remarks:
     None
 *******************************************************************************/
+#if defined(USB_USE_MIDI)
 void convertMidiToOsc(void)
 {
-    BYTE currentEndpoint;
+    BYTE ce;
+    HOST_MIDI_PACKET* hostMidiPacket;
 
-    switch(ProcState)
+    if(getProcState() == STATE_READY)
     {
-        case STATE_INITIALIZE:
-            ProcState = STATE_IDLE;
-            break;
-        case STATE_IDLE:
-            break;
-        case STATE_READY:
-            for(currentEndpoint = 0; currentEndpoint < USBHostMIDINumberOfEndpoints(deviceHandle); currentEndpoint++)
-            {                
-                switch(endpointBuffers[currentEndpoint].TransferState)
-                {
-                    case RX_DATA:
-                        if(USBHostMIDIRead(deviceHandle, currentEndpoint, endpointBuffers[currentEndpoint].pBufWriteLocation, endpointBuffers[currentEndpoint].numOfMIDIPackets * sizeof(USB_AUDIO_MIDI_PACKET)) == USB_SUCCESS)
-                        {
-                            endpointBuffers[currentEndpoint].TransferState = RX_DATA_WAIT;
-                        }
-                        break;
-                    case RX_DATA_WAIT:
-                        if(!USBHostMIDITransferIsBusy(deviceHandle, currentEndpoint))
-                        {
-                            midiType = endpointBuffers[currentEndpoint].pBufWriteLocation->DATA_0 & 0xF0;
-                            midiCh = endpointBuffers[currentEndpoint].pBufWriteLocation->DATA_0 & 0x0F;
-                            midiNum = endpointBuffers[currentEndpoint].pBufWriteLocation->DATA_1;
-                            midiVal = endpointBuffers[currentEndpoint].pBufWriteLocation->DATA_2;
-                            
-                            if(getInitSendFlag())
-                            {
-                                switch(midiType)
-                                {
-                                    case 0x80:// Note off
-                                    case 0x90:// Note on
-                                        sendOSCMessage(midiPrefix, msgNote, "iii", midiCh, midiNum, midiVal);
-                                        break;
-                                    case 0xA0:// Key Pressure
-                                        sendOSCMessage(midiPrefix, msgKp, "iii", midiCh, midiNum, midiVal);
-                                        break;
-                                    case 0xB0:// Control Change
-                                        sendOSCMessage(midiPrefix, msgCc, "iii", midiCh, midiNum, midiVal);
-                                        break;
-                                    case 0xC0:// Program Change
-                                        sendOSCMessage(midiPrefix, msgPc, "i", midiNum);
-                                        break;
-                                    case 0xD0:// Channel Pressure
-                                        sendOSCMessage(midiPrefix, msgCp, "ii", midiCh, midiNum);
-                                        break;
-                                    case 0xE0:// Pitch Bend
-                                        sendOSCMessage(midiPrefix, msgPb, "iii", midiCh, midiNum, midiVal);
-                                        break;
-                                    default:
-                                        break;
-                                }
-                                //naze StackTask();
-                            }
+        hostMidiPacket = getHostMIDIPacket();
 
-                            endpointBuffers[currentEndpoint].TransferState = RX_DATA;
-                            endpointBuffers[currentEndpoint].pBufWriteLocation += endpointBuffers[currentEndpoint].numOfMIDIPackets;
-                            if(endpointBuffers[currentEndpoint].pBufWriteLocation - endpointBuffers[currentEndpoint].bufferStart >= endpointBuffers[currentEndpoint].numOfMIDIPackets * MIDI_USB_BUFFER_SIZE)
-                            {
-                                endpointBuffers[currentEndpoint].pBufWriteLocation = endpointBuffers[currentEndpoint].bufferStart;
-                            }
-                        }
-                        break;
-                    case TX_DATA:
-                        if(endpointBuffers[currentEndpoint].pBufReadLocation != endpointBuffers[currentEndpoint].pBufWriteLocation)
-                        {
-                            if(USBHostMIDIWrite(deviceHandle, currentEndpoint, endpointBuffers[currentEndpoint].pBufReadLocation, endpointBuffers[currentEndpoint].numOfMIDIPackets * sizeof(USB_AUDIO_MIDI_PACKET)) == USB_SUCCESS)
-                            {
-                                endpointBuffers[currentEndpoint].TransferState = TX_DATA_WAIT;
-                            }
-                        }    
-                        break;
-                    case TX_DATA_WAIT:
-                        if(!USBHostMIDITransferIsBusy(deviceHandle, currentEndpoint))
-                        {
-                            endpointBuffers[currentEndpoint].TransferState = TX_DATA;
-                            endpointBuffers[currentEndpoint].pBufReadLocation += endpointBuffers[currentEndpoint].numOfMIDIPackets;
-                                
-                            if(endpointBuffers[currentEndpoint].pBufReadLocation - endpointBuffers[currentEndpoint].bufferStart >= endpointBuffers[currentEndpoint].numOfMIDIPackets * MIDI_USB_BUFFER_SIZE)
-                            {
-                                endpointBuffers[currentEndpoint].pBufReadLocation = endpointBuffers[currentEndpoint].bufferStart;
-                            }
-                        }        
-                        break;
+        for(ce = 0; ce < getUSBHostMIDINumberOfEndpoints(); ce++)
+        {
+            if(getInitSendFlag() && hostMidiPacket[ce].rcvFlag)
+            {
+                switch(hostMidiPacket[ce].type)
+                {
+                case 0x80:// Note off
+                case 0x90:// Note on
+                    sendOSCMessage(midiPrefix, msgNote, "iii", hostMidiPacket[ce].ch, hostMidiPacket[ce].num, hostMidiPacket[ce].val);
+                    break;
+                case 0xA0:// Key Pressure
+                    sendOSCMessage(midiPrefix, msgKp, "iii", hostMidiPacket[ce].ch, hostMidiPacket[ce].num, hostMidiPacket[ce].val);
+                    break;
+                case 0xB0:// Control Change
+                    sendOSCMessage(midiPrefix, msgCc, "iii", hostMidiPacket[ce].ch, hostMidiPacket[ce].num, hostMidiPacket[ce].val);
+                    break;
+                case 0xC0:// Program Change
+                    sendOSCMessage(midiPrefix, msgPc, "i", hostMidiPacket[ce].num);
+                    break;
+                case 0xD0:// Channel Pressure
+                    sendOSCMessage(midiPrefix, msgCp, "ii", hostMidiPacket[ce].ch, hostMidiPacket[ce].num);
+                    break;
+                case 0xE0:// Pitch Bend
+                    sendOSCMessage(midiPrefix, msgPb, "iii", hostMidiPacket[ce].ch, hostMidiPacket[ce].num, hostMidiPacket[ce].val);
+                    break;
+                default:
+                    break;
                 }
-                //delayUs(2);
             }
-            break;
-        case STATE_ERROR:
-            LED_2_On();
-            break;
-        default:
-            ProcState = STATE_INITIALIZE;
-            break;
+        }
+        free(hostMidiPacket);
+        hostMidiPacket = NULL;
     }
 }
+#endif
 
 #if defined(USB_USE_HID) // hid
+void App_Detect_Device(void)
+{
+  if(!USBHostHID_ApiDeviceDetect())
+  {
+      App_State_Mouse = DEVICE_NOT_CONNECTED;
+  }
+}
+void App_ProcessInputReport(void)
+{
+    BYTE  data;
+   /* process input report received from device */
+    USBHostHID_ApiImportData(Appl_raw_report_buffer.ReportData, Appl_raw_report_buffer.ReportSize
+                          ,Appl_Button_report_buffer, &Appl_Mouse_Buttons_Details);
+    USBHostHID_ApiImportData(Appl_raw_report_buffer.ReportData, Appl_raw_report_buffer.ReportSize
+                          ,Appl_XY_report_buffer, &Appl_XY_Axis_Details);
+
+ // X-axis
+    data = (Appl_XY_report_buffer[0] & 0xF0) >> 4;
+    //LCD_DATA_LINE_ONE[5] = App_DATA2ASCII(data);
+    data = (Appl_XY_report_buffer[0] & 0x0F);
+    //LCD_DATA_LINE_ONE[6] = App_DATA2ASCII(data);
+
+ // Y-axis
+    data = (Appl_XY_report_buffer[1] & 0xF0) >> 4;
+    //LCD_DATA_LINE_ONE[13] = App_DATA2ASCII(data);
+    data = (Appl_XY_report_buffer[1] & 0x0F);
+    //LCD_DATA_LINE_ONE[14] = App_DATA2ASCII(data);
+    
+    if(Appl_Button_report_buffer[0] == 1)
+    {
+#if 0
+        if(LCD_DATA_LINE_TWO[5] == '0')
+            LCD_DATA_LINE_TWO[5] =  '1';
+        else
+            LCD_DATA_LINE_TWO[5] =  '0';
+#endif
+    }
+    if(Appl_Button_report_buffer[1] == 1)
+    {
+#if 0
+        if(LCD_DATA_LINE_TWO[13] == '0')
+            LCD_DATA_LINE_TWO[13] =  '1';
+        else
+            LCD_DATA_LINE_TWO[13] =  '0';
+#endif
+    }
+
+    //LCDDisplayString((BYTE*)LCD_DATA_LINE_ONE, LCD_LINE_ONE);
+    //LCDDisplayString((BYTE*)LCD_DATA_LINE_TWO, LCD_LINE_TWO);
+#if 0
+    #ifdef DEBUG_MODE
+    {
+        unsigned int i;
+
+        UART2PrintString( "\n\rHID: Raw Report  " );
+        for(i=0;i<(Appl_raw_report_buffer.ReportSize);i++)
+        {
+            UART2PutHex( Appl_raw_report_buffer.ReportData[i]);
+            UART2PrintString( "-" );
+        }
+        UART2PrintString( "\n\r  Left Bt :  " ); UART2PutHex( Appl_Button_report_buffer[0]);
+        UART2PrintString( "\n\r  Right Bt :  " ); UART2PutHex( Appl_Button_report_buffer[1]);
+    
+        UART2PrintString( "\n\r  X-Axis :  " ); UART2PutHex( Appl_XY_report_buffer[0]);
+        UART2PrintString( "\n\r  Y-Axis :  " ); UART2PutHex( Appl_XY_report_buffer[1]);
+
+    }
+    #endif
+#endif
+}
+
 /*******************************************************************************
   Function:
     void convertHidToOsc(void)
@@ -5819,13 +6052,12 @@ void convertMidiToOsc(void)
 *******************************************************************************/
 void convertHidToOsc(void)
 {
-    //App_Detect_Device();
+    App_Detect_Device();
     switch(App_State_Mouse)
     {
         case DEVICE_NOT_CONNECTED:
             USBTasks();
-            //if(USBHostHID_ApiDeviceDetect()) /* True if report descriptor is parsed with no error */
-            if(USBHostHIDDeviceDetect(1))
+            if(USBHostHID_ApiDeviceDetect()) /* True if report descriptor is parsed with no error */
             {
                 App_State_Mouse = DEVICE_CONNECTED;
             }
@@ -5891,6 +6123,108 @@ void convertHidToOsc(void)
             break;       
     }
 }
+
+/****************************************************************************
+  Function:
+    BOOL USB_HID_DataCollectionHandler(void)
+  Description:
+    This function is invoked by HID client , purpose is to collect the
+    details extracted from the report descriptor. HID client will store
+    information extracted from the report descriptor in data structures.
+    Application needs to create object for each report type it needs to
+    extract.
+    For ex: HID_DATA_DETAILS Appl_ModifierKeysDetails;
+    HID_DATA_DETAILS is defined in file usb_host_hid_appl_interface.h
+    Each member of the structure must be initialized inside this function.
+    Application interface layer provides functions :
+    USBHostHID_ApiFindBit()
+    USBHostHID_ApiFindValue()
+    These functions can be used to fill in the details as shown in the demo
+    code.
+
+  Precondition:
+    None
+
+  Parameters:
+    None
+
+  Return Values:
+    TRUE    - If the report details are collected successfully.
+    FALSE   - If the application does not find the the supported format.
+
+  Remarks:
+    This Function name should be entered in the USB configuration tool
+    in the field "Parsed Data Collection handler".
+    If the application does not define this function , then HID cient
+    assumes that Application is aware of report format of the attached
+    device.
+***************************************************************************/
+BOOL USB_HID_DataCollectionHandler(void)
+{
+  BYTE NumOfReportItem = 0;
+  BYTE i;
+  USB_HID_ITEM_LIST* pitemListPtrs;
+  USB_HID_DEVICE_RPT_INFO* pDeviceRptinfo;
+  HID_REPORTITEM *reportItem;
+  HID_USAGEITEM *hidUsageItem;
+  BYTE usageIndex;
+  BYTE reportIndex;
+
+  pDeviceRptinfo = USBHostHID_GetCurrentReportInfo(); // Get current Report Info pointer
+  pitemListPtrs = USBHostHID_GetItemListPointers();   // Get pointer to list of item pointers
+
+  BOOL status = FALSE;
+   /* Find Report Item Index for Modifier Keys */
+   /* Once report Item is located , extract information from data structures provided by the parser */
+   NumOfReportItem = pDeviceRptinfo->reportItems;
+   for(i=0;i<NumOfReportItem;i++)
+    {
+       reportItem = &pitemListPtrs->reportItemList[i];
+       if((reportItem->reportType==hidReportInput) && (reportItem->dataModes == (HIDData_Variable|HIDData_Relative))&&
+           (reportItem->globals.usagePage==USAGE_PAGE_GEN_DESKTOP))
+        {
+           /* We now know report item points to modifier keys */
+           /* Now make sure usage Min & Max are as per application */
+            usageIndex = reportItem->firstUsageItem;
+            hidUsageItem = &pitemListPtrs->usageItemList[usageIndex];
+
+            reportIndex = reportItem->globals.reportIndex;
+            Appl_XY_Axis_Details.reportLength = (pitemListPtrs->reportList[reportIndex].inputBits + 7)/8;
+            Appl_XY_Axis_Details.reportID = (BYTE)reportItem->globals.reportID;
+            Appl_XY_Axis_Details.bitOffset = (BYTE)reportItem->startBit;
+            Appl_XY_Axis_Details.bitLength = (BYTE)reportItem->globals.reportsize;
+            Appl_XY_Axis_Details.count=(BYTE)reportItem->globals.reportCount;
+            Appl_XY_Axis_Details.interfaceNum= USBHostHID_ApiGetCurrentInterfaceNum();
+        }
+        else if((reportItem->reportType==hidReportInput) && (reportItem->dataModes == HIDData_Variable)&&
+           (reportItem->globals.usagePage==USAGE_PAGE_BUTTONS))
+        {
+           /* We now know report item points to modifier keys */
+           /* Now make sure usage Min & Max are as per application */
+            usageIndex = reportItem->firstUsageItem;
+            hidUsageItem = &pitemListPtrs->usageItemList[usageIndex];
+
+            reportIndex = reportItem->globals.reportIndex;
+            Appl_Mouse_Buttons_Details.reportLength = (pitemListPtrs->reportList[reportIndex].inputBits + 7)/8;
+            Appl_Mouse_Buttons_Details.reportID = (BYTE)reportItem->globals.reportID;
+            Appl_Mouse_Buttons_Details.bitOffset = (BYTE)reportItem->startBit;
+            Appl_Mouse_Buttons_Details.bitLength = (BYTE)reportItem->globals.reportsize;
+            Appl_Mouse_Buttons_Details.count=(BYTE)reportItem->globals.reportCount;
+            Appl_Mouse_Buttons_Details.interfaceNum= USBHostHID_ApiGetCurrentInterfaceNum();
+        }
+    }
+
+   if(pDeviceRptinfo->reports == 1)
+    {
+        Appl_raw_report_buffer.Report_ID = 0;
+        Appl_raw_report_buffer.ReportSize = (pitemListPtrs->reportList[reportIndex].inputBits + 7)/8;
+//        Appl_raw_report_buffer.ReportData = (BYTE*)malloc(Appl_raw_report_buffer.ReportSize);
+        Appl_raw_report_buffer.ReportPollRate = pDeviceRptinfo->reportPollingRate;
+        status = TRUE;
+    }
+
+    return(status);
+}
 #endif
 
 #if defined(USB_USE_CDC)
@@ -5952,29 +6286,29 @@ void USB_CDC_RxTxHandler(void)
 
     if(!USBHostCDC_ApiDeviceDetect()) /* TRUE if device is enumerated without error */
     {
-       APPL_CDC_State = DEVICE_NOT_CONNECTED;
+       setApplCDCState(DEVICE_NOT_CONNECTED);
     }
 
-    switch(APPL_CDC_State)
+    switch(getApplCDCState())
     {
         case DEVICE_NOT_CONNECTED:
             USBTasks();
             if(USBHostCDC_ApiDeviceDetect()) /* TRUE if device is enumerated without error */
             {
-                APPL_CDC_State = DEVICE_CONNECTED;
+                setApplCDCState(DEVICE_CONNECTED);
             }
             break;
         case DEVICE_CONNECTED:
-            APPL_CDC_State = READY_TO_TX_RX;
+            setApplCDCState(READY_TO_TX_RX);
             break;
         case GET_IN_DATA:
             if(USBHostCDC_Api_Get_IN_Data(MAX_NO_OF_IN_BYTES, USB_CDC_IN_Data_Array))
             {
-                APPL_CDC_State = GET_IN_DATA_WAIT;
+                setApplCDCState(GET_IN_DATA_WAIT);
             }
             else
             {
-                APPL_CDC_State = READY_TO_TX_RX;
+                setApplCDCState(READY_TO_TX_RX);
             }
             break;
         case GET_IN_DATA_WAIT:
@@ -5989,29 +6323,29 @@ void USB_CDC_RxTxHandler(void)
                             sendOSCMessage(cdcPrefix, msgData, "iii", i, NumOfBytesRcvd, USB_CDC_IN_Data_Array[i]);
                         }
                     }
-                    APPL_CDC_State = READY_TO_TX_RX;
+                    setApplCDCState(READY_TO_TX_RX);
                 }
                 else
                 {
-                    APPL_CDC_State = READY_TO_TX_RX;
+                    setApplCDCState(READY_TO_TX_RX);
                 }
             }
             break;
         case SEND_OUT_DATA:
             if(USBHostCDC_Api_Send_OUT_Data(cdcOutDataLength, USB_CDC_OUT_Data_Array))
             {
-                APPL_CDC_State = SEND_OUT_DATA_WAIT;
+                setApplCDCState(SEND_OUT_DATA_WAIT);
             }
             else
             {
-                APPL_CDC_State = READY_TO_TX_RX;
+                setApplCDCState(READY_TO_TX_RX);
             }
             break;
         case SEND_OUT_DATA_WAIT:
             if(USBHostCDC_ApiTransferIsComplete(&ErrorDriver, &NumOfBytesRcvd))
             {
                 USBHostCDC_Clear_Out_DATA_Array();
-                APPL_CDC_State = READY_TO_TX_RX;
+                setApplCDCState(READY_TO_TX_RX);
 
                 cdcSendFlag = FALSE;
             }
@@ -6020,12 +6354,12 @@ void USB_CDC_RxTxHandler(void)
 
             if(cdcSendFlag)
             {
-                APPL_CDC_State = SEND_OUT_DATA;
+                setApplCDCState(SEND_OUT_DATA);
                 //cdcSendFlag = FALSE;
             }
             else
             {
-                APPL_CDC_State = READY_TO_TX_RX;
+                setApplCDCState(READY_TO_TX_RX);
             }
             break;
         default :
@@ -6033,830 +6367,3 @@ void USB_CDC_RxTxHandler(void)
     }
 }
 #endif
-
-// ******************************************************************************************************
-// ************** USB Callback Functions ****************************************************************
-// ******************************************************************************************************
-// The USB firmware stack will call the callback functions USBCBxxx() in response to certain USB related
-// events.  For example, if the host PC is powering down, it will stop sending out Start of Frame (SOF)
-// packets to your device.  In response to this, all USB devices are supposed to decrease their power
-// consumption from the USB Vbus to <2.5mA each.  The USB module detects this condition (which according
-// to the USB specifications is 3+ms of no bus activity/SOF packets) and then calls the USBCBSuspend()
-// function.  You should modify these callback functions to take appropriate actions for each of these
-// conditions.  For example, in the USBCBSuspend(), you may wish to add code that will decrease power
-// consumption from Vbus to <2.5mA (such as by clock switching, turning off LEDs, putting the
-// microcontroller to sleep, etc.).  Then, in the USBCBWakeFromSuspend() function, you may then wish to
-// add code that undoes the power saving things done in the USBCBSuspend() function.
-
-// The USBCBSendResume() function is special, in that the USB stack will not automatically call this
-// function.  This function is meant to be called from the application firmware instead.  See the
-// additional comments near the function.
-
-/******************************************************************************
- * Function:        void USBCBSuspend(void)
- *
- * PreCondition:    None
- *
- * Input:           None
- *
- * Output:          None
- *
- * Side Effects:    None
- *
- * Overview:        Call back that is invoked when a USB suspend is detected
- *
- * Note:            None
- *****************************************************************************/
-void USBCBSuspend(void)
-{
-	//Example power saving code.  Insert appropriate code here for the desired
-	//application behavior.  If the microcontroller will be put to sleep, a
-	//process similar to that shown below may be used:
-
-	//ConfigureIOPinsForLowPower();
-	//SaveStateOfAllInterruptEnableBits();
-	//DisableAllInterruptEnableBits();
-	//EnableOnlyTheInterruptsWhichWillBeUsedToWakeTheMicro();	//should enable at least USBActivityIF as a wake source
-	//Sleep();
-	//RestoreStateOfAllPreviouslySavedInterruptEnableBits();	//Preferrably, this should be done in the USBCBWakeFromSuspend() function instead.
-	//RestoreIOPinsToNormal();									//Preferrably, this should be done in the USBCBWakeFromSuspend() function instead.
-
-	//IMPORTANT NOTE: Do not clear the USBActivityIF (ACTVIF) bit here.  This bit is
-	//cleared inside the usb_device.c file.  Clearing USBActivityIF here will cause
-	//things to not work as intended.
-
-
-    #if defined(__C30__)
-    #if 0
-        U1EIR = 0xFFFF;
-        U1IR = 0xFFFF;
-        U1OTGIR = 0xFFFF;
-        IFS5bits.USB1IF = 0;
-        IEC5bits.USB1IE = 1;
-        U1OTGIEbits.ACTVIE = 1;
-        U1OTGIRbits.ACTVIF = 1;
-        Sleep();
-    #endif
-    #endif
-}
-
-
-/******************************************************************************
- * Function:        void _USB1Interrupt(void)
- *
- * PreCondition:    None
- *
- * Input:           None
- *
- * Output:          None
- *
- * Side Effects:    None
- *
- * Overview:        This function is called when the USB interrupt bit is set
- *					In this example the interrupt is only used when the device
- *					goes to sleep when it receives a USB suspend command
- *
- * Note:            None
- *****************************************************************************/
-#if 0
-void __attribute__ ((interrupt)) _USB1Interrupt(void)
-{
-    #if !defined(self_powered)
-        if(U1OTGIRbits.ACTVIF)
-        {
-            IEC5bits.USB1IE = 0;
-            U1OTGIEbits.ACTVIE = 0;
-            IFS5bits.USB1IF = 0;
-
-            //USBClearInterruptFlag(USBActivityIFReg,USBActivityIFBitNum);
-            USBClearInterruptFlag(USBIdleIFReg,USBIdleIFBitNum);
-            //USBSuspendControl = 0;
-        }
-    #endif
-}
-#endif
-
-/******************************************************************************
- * Function:        void USBCBWakeFromSuspend(void)
- *
- * PreCondition:    None
- *
- * Input:           None
- *
- * Output:          None
- *
- * Side Effects:    None
- *
- * Overview:        The host may put USB peripheral devices in low power
- *					suspend mode (by "sending" 3+ms of idle).  Once in suspend
- *					mode, the host may wake the device back up by sending non-
- *					idle state signalling.
- *
- *					This call back is invoked when a wakeup from USB suspend
- *					is detected.
- *
- * Note:            None
- *****************************************************************************/
-void USBCBWakeFromSuspend(void)
-{
-	// If clock switching or other power savings measures were taken when
-	// executing the USBCBSuspend() function, now would be a good time to
-	// switch back to normal full power run mode conditions.  The host allows
-	// a few milliseconds of wakeup time, after which the device must be
-	// fully back to normal, and capable of receiving and processing USB
-	// packets.  In order to do this, the USB module must receive proper
-	// clocking (IE: 48MHz clock must be available to SIE for full speed USB
-	// operation).
-}
-
-/********************************************************************
- * Function:        void USBCB_SOF_Handler(void)
- *
- * PreCondition:    None
- *
- * Input:           None
- *
- * Output:          None
- *
- * Side Effects:    None
- *
- * Overview:        The USB host sends out a SOF packet to full-speed
- *                  devices every 1 ms. This interrupt may be useful
- *                  for isochronous pipes. End designers should
- *                  implement callback routine as necessary.
- *
- * Note:            None
- *******************************************************************/
-void USBCB_SOF_Handler(void)
-{
-    // No need to clear UIRbits.SOFIF to 0 here.
-    // Callback caller is already doing that.
-
-    if(msCounter != 0)
-    {
-        msCounter--;
-    }
-}
-
-/*******************************************************************
- * Function:        void USBCBErrorHandler(void)
- *
- * PreCondition:    None
- *
- * Input:           None
- *
- * Output:          None
- *
- * Side Effects:    None
- *
- * Overview:        The purpose of this callback is mainly for
- *                  debugging during development. Check UEIR to see
- *                  which error causes the interrupt.
- *
- * Note:            None
- *******************************************************************/
-void USBCBErrorHandler(void)
-{
-    // No need to clear UEIR to 0 here.
-    // Callback caller is already doing that.
-
-	// Typically, user firmware does not need to do anything special
-	// if a USB error occurs.  For example, if the host sends an OUT
-	// packet to your device, but the packet gets corrupted (ex:
-	// because of a bad connection, or the user unplugs the
-	// USB cable during the transmission) this will typically set
-	// one or more USB error interrupt flags.  Nothing specific
-	// needs to be done however, since the SIE will automatically
-	// send a "NAK" packet to the host.  In response to this, the
-	// host will normally retry to send the packet again, and no
-	// data loss occurs.  The system will typically recover
-	// automatically, without the need for application firmware
-	// intervention.
-
-	// Nevertheless, this callback function is provided, such as
-	// for debugging purposes.
-}
-
-
-/*******************************************************************
- * Function:        void USBCBCheckOtherReq(void)
- *
- * PreCondition:    None
- *
- * Input:           None
- *
- * Output:          None
- *
- * Side Effects:    None
- *
- * Overview:        When SETUP packets arrive from the host, some
- * 					firmware must process the request and respond
- *					appropriately to fulfill the request.  Some of
- *					the SETUP packets will be for standard
- *					USB "chapter 9" (as in, fulfilling chapter 9 of
- *					the official USB specifications) requests, while
- *					others may be specific to the USB device class
- *					that is being implemented.  For example, a HID
- *					class device needs to be able to respond to
- *					"GET REPORT" type of requests.  This
- *					is not a standard USB chapter 9 request, and
- *					therefore not handled by usb_device.c.  Instead
- *					this request should be handled by class specific
- *					firmware, such as that contained in usb_function_hid.c.
- *
- * Note:            None
- *******************************************************************/
-void USBCBCheckOtherReq(void)
-{
-	USBCheckHIDRequest();
-}//end
-
-
-/*******************************************************************
- * Function:        void USBCBStdSetDscHandler(void)
- *
- * PreCondition:    None
- *
- * Input:           None
- *
- * Output:          None
- *
- * Side Effects:    None
- *
- * Overview:        The USBCBStdSetDscHandler() callback function is
- *					called when a SETUP, bRequest: SET_DESCRIPTOR request
- *					arrives.  Typically SET_DESCRIPTOR requests are
- *					not used in most applications, and it is
- *					optional to support this type of request.
- *
- * Note:            None
- *******************************************************************/
-void USBCBStdSetDscHandler(void)
-{
-    // Must claim session ownership if supporting this request
-}//end
-
-
-/*******************************************************************
- * Function:        void USBCBInitEP(void)
- *
- * PreCondition:    None
- *
- * Input:           None
- *
- * Output:          None
- *
- * Side Effects:    None
- *
- * Overview:        This function is called when the device becomes
- *                  initialized, which occurs after the host sends a
- * 					SET_CONFIGURATION (wValue not = 0) request.  This
- *					callback function should initialize the endpoints
- *					for the device's usage according to the current
- *					configuration.
- *
- * Note:            None
- *******************************************************************/
-void USBCBInitEP(void)
-{
-	//enable the HID endpoint
-    USBEnableEndpoint(HID_EP, USB_IN_ENABLED | USB_OUT_ENABLED | USB_HANDSHAKE_ENABLED | USB_DISALLOW_SETUP);
-    //Re-arm the OUT endpoint for the next packet
-    //USBOutHandle = HIDRxPacket(HID_EP | MIDI_EP,(BYTE*)&ReceivedHidDataBuffer,64);
-    HIDRxHandle = USBRxOnePacket(HID_EP, (BYTE*)&ReceivedHidDataBuffer, 64);
-
-    //enable the HID endpoint
-    USBEnableEndpoint(MIDI_EP, USB_OUT_ENABLED | USB_IN_ENABLED | USB_HANDSHAKE_ENABLED | USB_DISALLOW_SETUP);
-    //Re-arm the OUT endpoint for the next packet
-    MIDIRxHandle = USBRxOnePacket(MIDI_EP, (BYTE*)&ReceivedMidiDataBuffer, 64);
-}
-
-/********************************************************************
- * Function:        void USBCBSendResume(void)
- *
- * PreCondition:    None
- *
- * Input:           None
- *
- * Output:          None
- *
- * Side Effects:    None
- *
- * Overview:        The USB specifications allow some types of USB
- * 					peripheral devices to wake up a host PC (such
- *					as if it is in a low power suspend to RAM state).
- *					This can be a very useful feature in some
- *					USB applications, such as an Infrared remote
- *					control	receiver.  If a user presses the "power"
- *					button on a remote control, it is nice that the
- *					IR receiver can detect this signalling, and then
- *					send a USB "command" to the PC to wake up.
- *					
- *					The USBCBSendResume() "callback" function is used
- *					to send this special USB signalling which wakes 
- *					up the PC.  This function may be called by
- *					application firmware to wake up the PC.  This
- *					function will only be able to wake up the host if
- *                  all of the below are true:
- *					
- *					1.  The USB driver used on the host PC supports
- *						the remote wakeup capability.
- *					2.  The USB configuration descriptor indicates
- *						the device is remote wakeup capable in the
- *						bmAttributes field.
- *					3.  The USB host PC is currently sleeping,
- *						and has previously sent your device a SET 
- *						FEATURE setup packet which "armed" the
- *						remote wakeup capability.   
- *
- *                  If the host has not armed the device to perform remote wakeup,
- *                  then this function will return without actually performing a
- *                  remote wakeup sequence.  This is the required behavior, 
- *                  as a USB device that has not been armed to perform remote 
- *                  wakeup must not drive remote wakeup signalling onto the bus;
- *                  doing so will cause USB compliance testing failure.
- *                  
- *					This callback should send a RESUME signal that
- *                  has the period of 1-15ms.
- *
- * Note:            This function does nothing and returns quickly, if the USB
- *                  bus and host are not in a suspended condition, or are 
- *                  otherwise not in a remote wakeup ready state.  Therefore, it
- *                  is safe to optionally call this function regularly, ex: 
- *                  anytime application stimulus occurs, as the function will
- *                  have no effect, until the bus really is in a state ready
- *                  to accept remote wakeup. 
- *
- *                  When this function executes, it may perform clock switching,
- *                  depending upon the application specific code in 
- *                  USBCBWakeFromSuspend().  This is needed, since the USB
- *                  bus will no longer be suspended by the time this function
- *                  returns.  Therefore, the USB module will need to be ready
- *                  to receive traffic from the host.
- *
- *                  The modifiable section in this routine may be changed
- *                  to meet the application needs. Current implementation
- *                  temporary blocks other functions from executing for a
- *                  period of ~3-15 ms depending on the core frequency.
- *
- *                  According to USB 2.0 specification section 7.1.7.7,
- *                  "The remote wakeup device must hold the resume signaling
- *                  for at least 1 ms but for no more than 15 ms."
- *                  The idea here is to use a delay counter loop, using a
- *                  common value that would work over a wide range of core
- *                  frequencies.
- *                  That value selected is 1800. See table below:
- *                  ==========================================================
- *                  Core Freq(MHz)      MIP         RESUME Signal Period (ms)
- *                  ==========================================================
- *                      48              12          1.05
- *                       4              1           12.6
- *                  ==========================================================
- *                  * These timing could be incorrect when using code
- *                    optimization or extended instruction mode,
- *                    or when having other interrupts enabled.
- *                    Make sure to verify using the MPLAB SIM's Stopwatch
- *                    and verify the actual signal on an oscilloscope.
- *******************************************************************/
-void USBCBSendResume(void)
-{
-    static WORD delay_count;
-    
-    //First verify that the host has armed us to perform remote wakeup.
-    //It does this by sending a SET_FEATURE request to enable remote wakeup,
-    //usually just before the host goes to standby mode (note: it will only
-    //send this SET_FEATURE request if the configuration descriptor declares
-    //the device as remote wakeup capable, AND, if the feature is enabled
-    //on the host (ex: on Windows based hosts, in the device manager 
-    //properties page for the USB device, power management tab, the 
-    //"Allow this device to bring the computer out of standby." checkbox 
-    //should be checked).
-    if(USBGetRemoteWakeupStatus() == TRUE) 
-    {
-        //Verify that the USB bus is in fact suspended, before we send
-        //remote wakeup signalling.
-        if(USBIsBusSuspended() == TRUE)
-        {
-            USBMaskInterrupts();
-            
-            //Clock switch to settings consistent with normal USB operation.
-            USBCBWakeFromSuspend();
-            USBSuspendControl = 0; 
-            USBBusIsSuspended = FALSE;  //So we don't execute this code again, 
-                                        //until a new suspend condition is detected.
-
-            //Section 7.1.7.7 of the USB 2.0 specifications indicates a USB
-            //device must continuously see 5ms+ of idle on the bus, before it sends
-            //remote wakeup signalling.  One way to be certain that this parameter
-            //gets met, is to add a 2ms+ blocking delay here (2ms plus at 
-            //least 3ms from bus idle to USBIsBusSuspended() == TRUE, yeilds
-            //5ms+ total delay since start of idle).
-            delay_count = 3600U;        
-            do
-            {
-                delay_count--;
-            }while(delay_count);
-            
-            //Now drive the resume K-state signalling onto the USB bus.
-            USBResumeControl = 1;       // Start RESUME signaling
-            delay_count = 1800U;        // Set RESUME line for 1-13 ms
-            do
-            {
-                delay_count--;
-            }while(delay_count);
-            USBResumeControl = 0;       //Finished driving resume signalling
-
-            USBUnmaskInterrupts();
-        }
-    }
-}
-
-
-/****************************************************************************
-  Function:
-    void App_Detect_Device(void)
-
-  Description:
-    This function monitors the status of device connected/disconnected
-
-  Precondition:
-    None
-
-  Parameters:
-    None
-
-  Return Values:
-    None
-
-  Remarks:
-    None
-***************************************************************************/
-#if defined(USB_USE_HID)
-void App_Detect_Device(void)
-{
-  if(!USBHostHID_ApiDeviceDetect())
-  {
-     App_State_Mouse = DEVICE_NOT_CONNECTED;
-  }
-}
-#endif
-
-/****************************************************************************
-  Function:
-    void App_ProcessInputReport(void)
-
-  Description:
-    This function processes input report received from HID device.
-
-  Precondition:
-    None
-
-  Parameters:
-    None
-
-  Return Values:
-    None
-
-  Remarks:
-    None
-***************************************************************************/
-#if defined(USB_USE_HID)
-void App_ProcessInputReport(void)
-{
-    BYTE  data;
-   /* process input report received from device */
-    USBHostHID_ApiImportData(Appl_raw_report_buffer.ReportData, Appl_raw_report_buffer.ReportSize
-                          ,Appl_Button_report_buffer, &Appl_Mouse_Buttons_Details);
-    USBHostHID_ApiImportData(Appl_raw_report_buffer.ReportData, Appl_raw_report_buffer.ReportSize
-                          ,Appl_XY_report_buffer, &Appl_XY_Axis_Details);
-
- // X-axis
-    data = (Appl_XY_report_buffer[0] & 0xF0) >> 4;
-    data = (Appl_XY_report_buffer[0] & 0x0F);
-
- // Y-axis
-    data = (Appl_XY_report_buffer[1] & 0xF0) >> 4;
-    data = (Appl_XY_report_buffer[1] & 0x0F);
-    
-    sendOSCMessage("/hid", "/get", "iiii", Appl_XY_report_buffer[0], Appl_XY_report_buffer[1], Appl_Button_report_buffer[0], Appl_Button_report_buffer[1]);
-    
-    if(Appl_Button_report_buffer[0] == 1)
-    {
-    }
-    if(Appl_Button_report_buffer[1] == 1)
-    {
-    }
-
-}
-#endif
-
-/****************************************************************************
-  Function:
-    BOOL USB_HID_DataCollectionHandler(void)
-  Description:
-    This function is invoked by HID client , purpose is to collect the 
-    details extracted from the report descriptor. HID client will store
-    information extracted from the report descriptor in data structures.
-    Application needs to create object for each report type it needs to 
-    extract.
-    For ex: HID_DATA_DETAILS Appl_ModifierKeysDetails;
-    HID_DATA_DETAILS is defined in file usb_host_hid_appl_interface.h
-    Each member of the structure must be initialized inside this function.
-    Application interface layer provides functions :
-    USBHostHID_ApiFindBit()
-    USBHostHID_ApiFindValue()
-    These functions can be used to fill in the details as shown in the demo
-    code.
-
-  Precondition:
-    None
-
-  Parameters:
-    None
-
-  Return Values:
-    TRUE    - If the report details are collected successfully.
-    FALSE   - If the application does not find the the supported format.
-
-  Remarks:
-    This Function name should be entered in the USB configuration tool
-    in the field "Parsed Data Collection handler".
-    If the application does not define this function , then HID cient 
-    assumes that Application is aware of report format of the attached
-    device.
-***************************************************************************/
-#if defined(USB_USE_HID)
-BOOL USB_HID_DataCollectionHandler(void)
-{
-  BYTE NumOfReportItem = 0;
-  BYTE i;
-  USB_HID_ITEM_LIST* pitemListPtrs;
-  USB_HID_DEVICE_RPT_INFO* pDeviceRptinfo;
-  HID_REPORTITEM *reportItem;
-  HID_USAGEITEM *hidUsageItem;
-  BYTE usageIndex;
-  BYTE reportIndex;
-
-  pDeviceRptinfo = USBHostHID_GetCurrentReportInfo(); // Get current Report Info pointer
-  pitemListPtrs = USBHostHID_GetItemListPointers();   // Get pointer to list of item pointers
-
-  BOOL status = FALSE;
-   /* Find Report Item Index for Modifier Keys */
-   /* Once report Item is located , extract information from data structures provided by the parser */
-   NumOfReportItem = pDeviceRptinfo->reportItems;
-   for(i=0;i<NumOfReportItem;i++)
-    {
-       reportItem = &pitemListPtrs->reportItemList[i];
-       //if((reportItem->reportType==hidReportInput) && (reportItem->dataModes == (HIDData_Variable|HIDData_Relative))&&
-       if((reportItem->reportType==hidReportInput) && (reportItem->dataModes == (HIDData_Variable))&&
-           (reportItem->globals.usagePage==USAGE_PAGE_GEN_DESKTOP))
-        {
-           /* We now know report item points to modifier keys */
-           /* Now make sure usage Min & Max are as per application */
-            usageIndex = reportItem->firstUsageItem;
-            hidUsageItem = &pitemListPtrs->usageItemList[usageIndex];
-
-            reportIndex = reportItem->globals.reportIndex;
-            Appl_XY_Axis_Details.reportLength = (pitemListPtrs->reportList[reportIndex].inputBits + 7)/8;
-            Appl_XY_Axis_Details.reportID = (BYTE)reportItem->globals.reportID;
-            Appl_XY_Axis_Details.bitOffset = (BYTE)reportItem->startBit;
-            Appl_XY_Axis_Details.bitLength = (BYTE)reportItem->globals.reportsize;
-            Appl_XY_Axis_Details.count=(BYTE)reportItem->globals.reportCount;
-            Appl_XY_Axis_Details.interfaceNum= USBHostHID_ApiGetCurrentInterfaceNum();
-        }
-        else if((reportItem->reportType==hidReportInput) && (reportItem->dataModes == HIDData_Variable)&&
-           (reportItem->globals.usagePage==USAGE_PAGE_BUTTONS))
-        {
-           /* We now know report item points to modifier keys */
-           /* Now make sure usage Min & Max are as per application */
-            usageIndex = reportItem->firstUsageItem;
-            hidUsageItem = &pitemListPtrs->usageItemList[usageIndex];
-
-            reportIndex = reportItem->globals.reportIndex;
-            Appl_Mouse_Buttons_Details.reportLength = (pitemListPtrs->reportList[reportIndex].inputBits + 7)/8;
-            Appl_Mouse_Buttons_Details.reportID = (BYTE)reportItem->globals.reportID;
-            Appl_Mouse_Buttons_Details.bitOffset = (BYTE)reportItem->startBit;
-            Appl_Mouse_Buttons_Details.bitLength = (BYTE)reportItem->globals.reportsize;
-            Appl_Mouse_Buttons_Details.count=(BYTE)reportItem->globals.reportCount;
-            Appl_Mouse_Buttons_Details.interfaceNum= USBHostHID_ApiGetCurrentInterfaceNum();
-        }
-    }
-
-   if(pDeviceRptinfo->reports == 1)
-    {
-        Appl_raw_report_buffer.Report_ID = 0;
-        Appl_raw_report_buffer.ReportSize = (pitemListPtrs->reportList[reportIndex].inputBits + 7)/8;
-//        Appl_raw_report_buffer.ReportData = (BYTE*)malloc(Appl_raw_report_buffer.ReportSize);
-        Appl_raw_report_buffer.ReportPollRate = pDeviceRptinfo->reportPollingRate;
-        status = TRUE;
-    }
-
-    return(status);
-}
-#endif
-
-/*******************************************************************
- * Function:        BOOL USER_USB_CALLBACK_EVENT_HANDLER(
- *                        USB_EVENT event, void *pdata, WORD size)
- *
- * PreCondition:    None
- *
- * Input:           USB_EVENT event - the type of event
- *                  void *pdata - pointer to the event data
- *                  WORD size - size of the event data
- *
- * Output:          None
- *
- * Side Effects:    None
- *
- * Overview:        This function is called from the USB stack to
- *                  notify a user application that a USB event
- *                  occured.  This callback is in interrupt context
- *                  when the USB_INTERRUPT option is selected.
- *
- * Note:            None
- *******************************************************************/
-BOOL USER_USB_CALLBACK_EVENT_HANDLER(USB_EVENT event, void *pdata, WORD size)
-{
-    switch( (INT)event )
-    {
-        case EVENT_TRANSFER:
-            //Add application specific callback task or callback function here if desired.
-            break;
-        case EVENT_SOF:
-            USBCB_SOF_Handler();
-            break;
-        case EVENT_SUSPEND:
-            USBCBSuspend();
-            break;
-        case EVENT_RESUME:
-            USBCBWakeFromSuspend();
-            break;
-        case EVENT_CONFIGURED:
-            USBCBInitEP();
-            break;
-        case EVENT_SET_DESCRIPTOR:
-            USBCBStdSetDscHandler();
-            break;
-        case EVENT_EP0_REQUEST:
-            USBCBCheckOtherReq();
-            break;
-        case EVENT_BUS_ERROR:
-            USBCBErrorHandler();
-            break;
-        case EVENT_TRANSFER_TERMINATED:
-            //Add application specific callback task or callback function here if desired.
-            //The EVENT_TRANSFER_TERMINATED event occurs when the host performs a CLEAR
-            //FEATURE (endpoint halt) request on an application endpoint which was 
-            //previously armed (UOWN was = 1).  Here would be a good place to:
-            //1.  Determine which endpoint the transaction that just got terminated was 
-            //      on, by checking the handle value in the *pdata.
-            //2.  Re-arm the endpoint if desired (typically would be the case for OUT 
-            //      endpoints).
-            break;
-        default:
-            break;
-    }
-    return TRUE;
-}
-
-/*************************************************************************
- * Function:        USB_ApplicationEventHandler
- *
- * Preconditions:   The USB must be initialized.
- *
- * Input:           event       Identifies the bus event that occured
- *
- *                  data        Pointer to event-specific data
- *
- *                  size        Size of the event-specific data
- *
- * Output:          deviceHandle (global)
- *                  Updates device handle pointer.
- *
- *                  endpointBuffers (global)
- *                  Allocates or Deallocates endpoint buffers.
- *
- *                  DemoState (global)
- *                  Updates the demo state as appropriate when events occur.
- *
- * Returns:         TRUE if the event was handled, FALSE if not
- *
- * Side Effects:    Event-specific actions have been taken.
- *
- * Overview:        This routine is called by the Host layer or client
- *                  driver to notify the application of events that occur.
- *                  If the event is recognized, it is handled and the
- *                  routine returns TRUE.  Otherwise, it is ignored (or
- *                  just "sniffed" and the routine returns FALSE.
- *************************************************************************/
-
-BOOL USB_ApplicationEventHandler ( BYTE address, USB_EVENT event, void *data, DWORD size )
-{
-    BYTE currentEndpoint;
-    ENDPOINT_DIRECTION direction;
-
-    // Handle specific events.
-    switch ((INT)event)
-    {
-        case EVENT_VBUS_REQUEST_POWER:
-        case EVENT_VBUS_RELEASE_POWER:
-        case EVENT_HUB_ATTACH:
-        case EVENT_UNSUPPORTED_DEVICE:
-        case EVENT_CANNOT_ENUMERATE:
-        case EVENT_CLIENT_INIT_ERROR:
-        case EVENT_OUT_OF_MEMORY:
-        case EVENT_UNSPECIFIED_ERROR:   // This should never be generated.
-        case EVENT_SUSPEND:
-        case EVENT_DETACH:
-        case EVENT_RESUME:
-        case EVENT_BUS_ERROR:
-            return TRUE;
-            break;
-#if defined(USB_USE_HID)
-        case EVENT_HID_RPT_DESC_PARSED:
-            #ifdef APPL_COLLECT_PARSED_DATA
-                return(APPL_COLLECT_PARSED_DATA());
-            #else
-                return TRUE;
-            #endif
-            break;
-#elif defined(USB_USE_CDC)
-        case EVENT_CDC_NONE:
-        case EVENT_CDC_ATTACH:
-        case EVENT_CDC_COMM_READ_DONE:
-        case EVENT_CDC_COMM_WRITE_DONE:
-        case EVENT_CDC_DATA_READ_DONE:
-        case EVENT_CDC_DATA_WRITE_DONE:
-        case EVENT_CDC_RESET:
-            return TRUE;
-            break;
-        case EVENT_CDC_NAK_TIMEOUT:
-                APPL_CDC_State = READY_TO_TX_RX;
-                return TRUE;
-            break;
-#endif
-        case EVENT_MIDI_ATTACH:
-            deviceHandle = data;
-            ProcState = STATE_READY;
-            
-            endpointBuffers = malloc(sizeof(ENDPOINT_BUFFER) * USBHostMIDINumberOfEndpoints(deviceHandle));
-            
-            for( currentEndpoint = 0; currentEndpoint < USBHostMIDINumberOfEndpoints(deviceHandle); currentEndpoint++ )
-            {
-                direction = USBHostMIDIEndpointDirection(deviceHandle, currentEndpoint);
-                // For OUT endpoints
-                if(direction == OUT)
-                {   
-                    // We only want to send NUM_MIDI_PKTS_IN_USB_PKT MIDI packet per USB packet
-                    endpointBuffers[currentEndpoint].numOfMIDIPackets = NUM_MIDI_PKTS_IN_USB_PKT;
-                    
-                    // And we want to start it off transmitting data
-                    endpointBuffers[currentEndpoint].TransferState = TX_DATA;
-                }
-                // For IN endpoints
-                else if (direction == IN)
-                {
-                    // We will accept however many will fit inside the maximum USB packet size
-                    endpointBuffers[currentEndpoint].numOfMIDIPackets = USBHostMIDISizeOfEndpoint(deviceHandle, currentEndpoint) / sizeof(USB_AUDIO_MIDI_PACKET);
-                    
-                    // And we want to start it off trying to read data
-                    endpointBuffers[currentEndpoint].TransferState = RX_DATA;
-                }
-                else
-                {
-                    continue;
-                }
-                
-                // Allocate the 2D buffer, and keep track of the write and read locations
-                endpointBuffers[currentEndpoint].bufferStart = malloc( sizeof(USB_AUDIO_MIDI_PACKET) * endpointBuffers[currentEndpoint].numOfMIDIPackets * MIDI_USB_BUFFER_SIZE );
-                endpointBuffers[currentEndpoint].pBufReadLocation = endpointBuffers[currentEndpoint].bufferStart;
-                endpointBuffers[currentEndpoint].pBufWriteLocation = endpointBuffers[currentEndpoint].bufferStart;
-            }    
-
-            return TRUE;
-            break;
-        case EVENT_MIDI_DETACH:
-            for( currentEndpoint = 0; currentEndpoint < USBHostMIDINumberOfEndpoints(deviceHandle); currentEndpoint++ )
-            {
-                free(endpointBuffers[currentEndpoint].bufferStart);
-                endpointBuffers[currentEndpoint].bufferStart = NULL;
-                endpointBuffers[currentEndpoint].pBufReadLocation = NULL;
-                endpointBuffers[currentEndpoint].pBufWriteLocation = NULL;
-            }
-            
-            free(endpointBuffers);
-            endpointBuffers = NULL;
-            
-            deviceHandle = NULL;
-            ProcState = STATE_INITIALIZE;
-            return TRUE;
-            break;
-        case EVENT_MIDI_TRANSFER_DONE:  // The main state machine will poll the driver.
-            return TRUE;
-            break;
-        default:
-            break;
-    }
-    return FALSE;
-} // USB_ApplicationEventHandler

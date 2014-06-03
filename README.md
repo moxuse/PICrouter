@@ -34,6 +34,7 @@ PICrouter will be an useful with the following purpose.
 * Develop an OSC/MIDI/HID controller for music or visual.
 * Study a PIC32 microcontroller.
 * Study a communication with usb and ethernet.
+* Study a mruby(Support ONLY PIC32MX795F512H version)
 
 Demo
 
@@ -68,7 +69,7 @@ Photographed by Kiyasu/TechnikLAB*
 How to buy
 ------
 You can buy the PICrouter on <a href="http://atelier.tkrworks.net/shop/index.php?main_page=product_info&cPath=2&products_id=29&language=en">tkrworks online store</a> and <a href="http://www.switch-science.com/catalog/1338/">SWITCH SCIENCE</a>.  
-The price of product is 7350JPY.
+The price of product is 7560JPY.
 
 Licenses
 ------
@@ -80,16 +81,17 @@ PICrouter is **Free Hardware** and **Free Software**.
 
 Specifications
 ------
-0. Supported mDNS(Bonjour on Mac OS X), DHCP(both server and client).
-1. Supported Open Sound Control.
-2. Supported the multicast address(224.0.0.1 and 224.0.0.251).
-3. Supported USB dual role function(DEVICE:MIDI & HID composite / HOST:MIDI & CDC composite).
-4. Supported [USB HID bootloader][an1388] on Mac OS X and Windows.
-5. PIC32MX675F512H(Freq:80MHz / FLASH:512K / RAM:64K)
-6. A/D port x14
-7. PWM output x4
-8. SPI x2, I2C x3, UART x1, JTAG x1 and CAN x1
-9. 100mm x 33.5mm, 4-layers board
+0. Supported mruby(ONLY PIC32MX795F512H version)
+1. Supported mDNS(Bonjour on Mac OS X), DHCP(both server and client).
+2. Supported Open Sound Control.
+3. Supported the multicast address(224.0.0.1 and 224.0.0.251).
+4. Supported USB dual role function(DEVICE:MIDI & HID composite / HOST:MIDI & CDC composite).
+5. Supported [USB HID bootloader][an1388] on Mac OS X and Windows.
+6. PIC32MX675F512H(Freq:80MHz / FLASH:512K / RAM:64K) or PIC32MX795F512H(Freq:80MHz / FLASH:512K / RAM:128K)
+7. A/D port x14
+8. PWM output x4
+9. SPI x2, I2C x3, UART x1, JTAG x1 and CAN x1
+10. 100mm x 33.5mm, 4-layers board
 
 [an1388]:http://www.microchip.com/stellent/idcplg?IdcService=SS_GET_PAGE&nodeId=1824&appnote=en554836
 
@@ -102,8 +104,8 @@ Pin Assign
 
 Development
 ------
-* Microchip [MPLABX] v1.85
-* Microchip [MPLAB XC32 Compiler] v1.21  
+* Microchip [MPLABX] v2.00
+* Microchip [MPLAB XC32 Compiler] v1.22  
   *To develop application, you can use free version.*
 
 [MPLABX]: http://www.microchip.com/pagehandler/en-us/family/mplabx/
@@ -135,10 +137,14 @@ Application Projects
 
 [AN1388]: http://www.microchip.com/stellent/idcplg?IdcService=SS_GET_PAGE&nodeId=1824&appnote=en554836 "AN1388"
 
-#### PICrouter (current ver. is 1.10.1) Updated 2013/09/06  
+#### PICrouter (current ver. is 1.13.0) Updated 2014/04/24  
   PICrouter is for Open Sound Control and USB Dual Role.  
   PICrouter.X is this project folder.  
   The Max6 demo patches are in Max_Demo_Patchexs folder.  
+
+#### PICrouter for mruby (current ver. is 0.2.3) Updated 2014/02/22  
+  PICrouter for mruby supports mruby, Open Sound Control and USB Dual Role.  
+  PICrouter_795_mrb.X is this project folder.
   
 Tutorial (JP)
 --------------------------------
